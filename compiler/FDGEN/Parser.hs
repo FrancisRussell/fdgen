@@ -26,9 +26,10 @@ type FDFLParser a = Parsec String FDFL a
 data ObjectType
  = FieldType
 
-data Field
- = Field
- deriving Show
+data Field = Field {
+  fieldName :: String,
+  fieldRank :: Integer
+} deriving Show
 
 data Mesh = Mesh {
   meshName :: String,
@@ -36,9 +37,19 @@ data Mesh = Mesh {
   meshFields :: [String]
 } deriving Show
 
+data MeshUpdate = MeshUpdate String [FieldUpdate]
+  deriving Show
+
+data FieldUpdate = FieldUpdate String FieldExpr
+  deriving Show
+
+data FieldExpr = FieldRef String
+  deriving Show
+
 data Definition
  = FieldDef Field
  | MeshDef Mesh
+ | FieldUpdateDef FieldUpdate
  deriving Show
 
 data AttributeValue
@@ -72,7 +83,7 @@ containsSymbol :: FDFL -> String -> Bool
 containsSymbol fdfl sym = Map.member sym $ symbols fdfl
 
 getTypedAttribute :: (AttributeValue -> Maybe v) -> Map String AttributeValue -> String -> Either String v
-getTypedAttribute converter map key = case Map.lookup key map of
+getTypedAttribute converter mapping key = case Map.lookup key mapping of
   Just value -> case converter value of
     Just typedValue -> Right typedValue
     Nothing -> Left $ "Attribute " ++ (show key) ++ " has incorrect type"
@@ -94,11 +105,11 @@ getIdentiferListAttribute :: Map String AttributeValue -> String -> Either Strin
 getIdentiferListAttribute = getTypedAttribute toIdentifierListAttribute
 
 getFieldIdentifier :: FDFL -> String -> Either String String
-getFieldIdentifier fdfl id = case Map.lookup id $ symbols fdfl of
-  Nothing -> Left $ "Symbol " ++ (show id) ++ " not defined."
+getFieldIdentifier fdfl ident = case Map.lookup ident $ symbols fdfl of
+  Nothing -> Left $ "Symbol " ++ (show ident) ++ " not defined."
   Just sym -> case sym of
-    FieldDef _ -> Right id
-    _ -> Left $ "Expected a field, but " ++ id ++ " is not."
+    FieldDef _ -> Right ident
+    _ -> Left $ "Expected a field, but " ++ ident ++ " is not."
 
 
 duplicateSymbolFail :: Show k => k -> a -> a -> a
@@ -111,7 +122,7 @@ fdflDef :: LanguageDef st
 fdflDef = emptyDef {
   caseSensitive = True,
   reservedOpNames = ["="],
-  reservedNames = ["Field", "True", "False", "Mesh"],
+  reservedNames = ["Field", "True", "False", "Mesh", "FieldUpdate"],
   commentLine = "#",
   identStart = letter
 }
@@ -122,6 +133,7 @@ TokenParser {
   reserved = parseReserved,
   parens = parseParens,
   commaSep = parseCommaSep,
+  comma = parseComma,
   stringLiteral = parseStringLiteral,
   integer = parseInteger,
   brackets = parseBrackets
@@ -136,7 +148,7 @@ parseFDFL =
 listToMap :: (Show k, Ord k) => [(k, v)] -> Either String (Map k v)
 listToMap lst = foldM combine Map.empty lst
   where
-  combine map (newK, newV) = case insertLookupWithKey (\_ v _ -> v) newK newV map of
+  combine oldMap (newK, newV) = case insertLookupWithKey (\_ v _ -> v) newK newV oldMap of
     (Nothing, newMap) -> Right newMap
     (Just _, _) -> Left $ "Duplicate attribute " ++ (show newK)
 
@@ -164,7 +176,8 @@ parseAssignment = do
 
 parseDefinition :: FDFLParser Definition
 parseDefinition = FieldDef <$> parseFieldDefinition <|>
-                  MeshDef <$> parseMeshDefinition
+                  MeshDef <$> parseMeshDefinition <|>
+                  FieldUpdateDef <$> parseFieldUpdateDefinition
 
 parseFieldDefinition :: FDFLParser Field
 parseFieldDefinition = do
@@ -183,8 +196,29 @@ parseMeshDefinition = do
     Left str -> parserFail str
     Right mesh -> return mesh
 
+parseFieldUpdateDefinition :: FDFLParser FieldUpdate
+parseFieldUpdateDefinition = do
+  parseReserved "FieldUpdate"
+  (name, value) <- parseParens $ parseArguments
+  return $ FieldUpdate name value
+  where
+    parseArguments = do
+      fdfl <- getState
+      field <- parserFailEither $ getFieldIdentifier fdfl <$> parseIdentifier
+      _ <- parseComma
+      value <- parseFieldExpr
+      return (field, value)
+
+parseFieldExpr :: FDFLParser FieldExpr
+parseFieldExpr = do
+  fdfl <- getState
+  FieldRef <$> (parserFailEither $ getFieldIdentifier fdfl <$> parseIdentifier)
+
 attributesToField :: Map String AttributeValue -> Either String Field
-attributesToField _ = Right Field
+attributesToField _map = do
+  name <- getStringAttribute _map "name"
+  rank <- getIntegerAttribute _map "rank"
+  return Field { fieldName = name, fieldRank = rank }
 
 attributesToMesh :: FDFL -> Map String AttributeValue -> Either String Mesh
 attributesToMesh fdfl _map = do
@@ -215,5 +249,5 @@ parseBool = choice
   , parseReserved "False" >> return False
   ]
 
-parseInput :: String -> Either ParseError FDFL
-parseInput = runParser parseFDFL emptyFDFL ""
+parseInput :: String -> String -> Either ParseError FDFL
+parseInput = runParser parseFDFL emptyFDFL

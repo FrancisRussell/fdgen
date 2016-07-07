@@ -12,7 +12,7 @@ getFileName _ = error "Usage: fgden input_file"
 processFile :: String -> IO()
 processFile filename = do
   contents <- readFile filename
-  let result = parseInput contents in
+  let result = parseInput filename contents in
     case result of
       Left err -> putStrLn $ show err
       Right spec -> putStrLn $ show spec
