@@ -6,7 +6,7 @@ import Control.Monad (foldM)
 import Text.Parsec.Char (letter)
 import Text.Parsec.Combinator (eof, choice)
 import Text.Parsec.Language (emptyDef, LanguageDef)
-import Text.Parsec (ParsecT, ParseError, runParser, getState, Parsec, modifyState)
+import Text.Parsec (ParsecT, ParseError, runParser, getState, Parsec, putState)
 import Text.Parsec.Prim (many, parserFail, (<|>), parsecMap)
 import Text.Parsec.Token (GenTokenParser(..), GenLanguageDef(..), makeTokenParser)
 import qualified Data.Map as Map
@@ -86,8 +86,8 @@ getTypedAttribute :: (AttributeValue -> Maybe v) -> Map String AttributeValue ->
 getTypedAttribute converter mapping key = case Map.lookup key mapping of
   Just value -> case converter value of
     Just typedValue -> Right typedValue
-    Nothing -> Left $ "Attribute " ++ (show key) ++ " has incorrect type"
-  Nothing ->  Left $ "Attribute " ++ (show key) ++ " not found"
+    Nothing -> Left $ "Attribute " ++ show key ++ " has incorrect type"
+  Nothing ->  Left $ "Attribute " ++ show key ++ " not found"
 
 getStringAttribute :: Map String AttributeValue -> String -> Either String String
 getStringAttribute = getTypedAttribute toStringAttribute
@@ -106,17 +106,16 @@ getIdentifierListAttribute = getTypedAttribute toIdentifierListAttribute
 
 getFieldIdentifier :: FDFL -> String -> Either String String
 getFieldIdentifier fdfl ident = case Map.lookup ident $ symbols fdfl of
-  Nothing -> Left $ "Symbol " ++ (show ident) ++ " not defined."
+  Nothing -> Left $ "Symbol " ++ show ident ++ " not defined."
   Just sym -> case sym of
     FieldDef _ -> Right ident
     _ -> Left $ "Expected a field, but " ++ ident ++ " is not."
 
 
-duplicateSymbolFail :: Show k => k -> a -> a -> a
-duplicateSymbolFail k _ _  = error $ "Attempted to redefine symbol " ++ (show k)
-
-addDefinition :: String -> Definition -> FDFL -> FDFL
-addDefinition symName def fdfl = fdfl { symbols = Map.insertWithKey duplicateSymbolFail symName def $ symbols fdfl}
+addDefinition :: FDFL -> String -> Definition ->Either String FDFL
+addDefinition fdfl symName def = if containsSymbol fdfl symName
+  then Left $ "Attempt to redefine symbol " ++ symName
+  else Right fdfl { symbols = Map.insert symName def $ symbols fdfl}
 
 fdflDef :: LanguageDef st
 fdflDef = emptyDef {
@@ -150,13 +149,13 @@ listToMap lst = foldM combine Map.empty lst
   where
   combine oldMap (newK, newV) = case insertLookupWithKey (\_ v _ -> v) newK newV oldMap of
     (Nothing, newMap) -> Right newMap
-    (Just _, _) -> Left $ "Duplicate attribute " ++ (show newK)
+    (Just _, _) -> Left $ "Duplicate attribute " ++ show newK
 
 listToSet :: (Show k, Ord k) => [k] -> Either String (Set  k)
 listToSet lst = foldM combine Set.empty lst
   where
   combine set newK = if Set.member newK set
-    then Left $ "Duplicate identifier " ++ (show newK)
+    then Left $ "Duplicate identifier " ++ show newK
     else Right $ Set.insert newK set
 
 parserFailEither :: ParsecT s u m (Either String a) -> ParsecT s u m a
@@ -170,8 +169,9 @@ parseAssignment :: FDFLParser ()
 parseAssignment = do
   symbolName <- parseIdentifier
   _ <- parseReservedOp "="
-  definition <- parseDefinition
-  modifyState $ addDefinition symbolName definition
+  state <- getState
+  newState <- parserFailEither $ addDefinition state symbolName <$> parseDefinition
+  putState newState
   return ()
 
 parseDefinition :: FDFLParser Definition
@@ -199,7 +199,7 @@ parseMeshDefinition = do
 parseFieldUpdateDefinition :: FDFLParser FieldUpdate
 parseFieldUpdateDefinition = do
   parseReserved "FieldUpdate"
-  (name, value) <- parseParens $ parseArguments
+  (name, value) <- parseParens parseArguments
   return $ FieldUpdate name value
   where
     parseArguments = do
