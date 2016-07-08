@@ -101,8 +101,8 @@ getBooleanAttribute = getTypedAttribute toBooleanAttribute
 getIdentifierAttribute :: Map String AttributeValue -> String -> Either String String
 getIdentifierAttribute = getTypedAttribute toIdentifierAttribute
 
-getIdentiferListAttribute :: Map String AttributeValue -> String -> Either String [String]
-getIdentiferListAttribute = getTypedAttribute toIdentifierListAttribute
+getIdentifierListAttribute :: Map String AttributeValue -> String -> Either String [String]
+getIdentifierListAttribute = getTypedAttribute toIdentifierListAttribute
 
 getFieldIdentifier :: FDFL -> String -> Either String String
 getFieldIdentifier fdfl ident = case Map.lookup ident $ symbols fdfl of
@@ -224,7 +224,7 @@ attributesToMesh :: FDFL -> Map String AttributeValue -> Either String Mesh
 attributesToMesh fdfl _map = do
   name <- getStringAttribute _map "name"
   dim <- getIntegerAttribute _map "dimension"
-  fields <- (getIdentiferListAttribute _map "fields") >>= mapM (getFieldIdentifier fdfl) >>= listToSet
+  fields <- (getIdentifierListAttribute _map "fields") >>= mapM (getFieldIdentifier fdfl) >>= listToSet
   return Mesh {meshName = name, meshDimension = dim, meshFields = Set.toList fields}
 
 parseAttribute :: FDFLParser (String, AttributeValue)
