@@ -9,7 +9,7 @@ Cabal-Version:       >=1.8.0.2
 Library
   Hs-Source-Dirs:    .
   GHC-Options:       -Wall -fno-warn-missing-signatures
-  Build-Depends:     base, parsec, containers
+  Build-Depends:     base, parsec, containers, lens
   Exposed-Modules:   FDGEN.Parser
 
 Executable fdgen

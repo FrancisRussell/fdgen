@@ -1,5 +1,5 @@
-V = Field(name="velocity", rank=1, staggered=False)
-H = Field(name="height", rank=0, staggered=True)
+V = Field(name="velocity", rank=1)
+H = Field(name="height", rank=0)
 m = Mesh(name="shallow_water", dimension=2, fields=[V, H])
 
 VelocityUpdate = FieldUpdate(V, V)

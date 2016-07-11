@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell #-}
 module FDGEN.Parser (parseInput) where
 import Data.Map
 import Data.Set
@@ -9,27 +10,9 @@ import Text.Parsec.Language (emptyDef, LanguageDef)
 import Text.Parsec (ParsecT, ParseError, runParser, getState, Parsec, putState)
 import Text.Parsec.Prim (many, parserFail, (<|>), parsecMap)
 import Text.Parsec.Token (GenTokenParser(..), GenLanguageDef(..), makeTokenParser)
+import qualified Control.Lens as Lens
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-
-data FDFL = FDFL {
-  symbols :: Map String Definition
-} deriving (Show)
-
-emptyFDFL :: FDFL
-emptyFDFL = FDFL {
-  symbols = Map.empty
-}
-
-type FDFLParser a = Parsec String FDFL a
-
-data ObjectType
- = FieldType
-
-data Field = Field {
-  fieldName :: String,
-  fieldRank :: Integer
-} deriving Show
 
 data Mesh = Mesh {
   meshName :: String,
@@ -37,8 +20,11 @@ data Mesh = Mesh {
   meshFields :: [String]
 } deriving Show
 
-data MeshUpdate = MeshUpdate String [FieldUpdate]
-  deriving Show
+data Field = Field {
+  fieldName :: String,
+  fieldRank :: Integer,
+  fieldSymmetric :: Bool
+} deriving Show
 
 data FieldUpdate = FieldUpdate String FieldExpr
   deriving Show
@@ -51,6 +37,33 @@ data Definition
  | MeshDef Mesh
  | FieldUpdateDef FieldUpdate
  deriving Show
+
+data FDFL = FDFL {
+  symbols :: Map String Definition
+} deriving Show
+
+data FDFLParseState = FDFLParseState {
+  _theFDFL :: FDFL
+} deriving Show
+
+Lens.makeLenses ''FDFLParseState
+
+emptyFDFL :: FDFL
+emptyFDFL = FDFL {
+  symbols = Map.empty
+}
+
+emptyFDFLParseState :: FDFLParseState
+emptyFDFLParseState = FDFLParseState {
+  _theFDFL = emptyFDFL
+}
+
+type FDFLParser a = Parsec String FDFLParseState a
+
+data MeshUpdate = MeshUpdate String [FieldUpdate]
+  deriving Show
+
+data StaggerStrategy = All | None | Dimension
 
 data AttributeValue
  = StringAttribute String
@@ -104,6 +117,11 @@ getIdentifierAttribute = getTypedAttribute toIdentifierAttribute
 getIdentifierListAttribute :: Map String AttributeValue -> String -> Either String [String]
 getIdentifierListAttribute = getTypedAttribute toIdentifierListAttribute
 
+getAttributeDefault :: a -> (Map String AttributeValue -> String -> Either String a) -> Map String AttributeValue -> String -> Either String a
+getAttributeDefault def getter _map _key = if Map.member _key _map
+  then getter _map _key
+  else Right def
+
 getFieldIdentifier :: FDFL -> String -> Either String String
 getFieldIdentifier fdfl ident = case Map.lookup ident $ symbols fdfl of
   Nothing -> Left $ "Symbol " ++ show ident ++ " not defined."
@@ -112,7 +130,7 @@ getFieldIdentifier fdfl ident = case Map.lookup ident $ symbols fdfl of
     _ -> Left $ "Expected a field, but " ++ ident ++ " is not."
 
 
-addDefinition :: FDFL -> String -> Definition ->Either String FDFL
+addDefinition :: FDFL -> String -> Definition -> Either String FDFL
 addDefinition fdfl symName def = if containsSymbol fdfl symName
   then Left $ "Attempt to redefine symbol " ++ symName
   else Right fdfl { symbols = Map.insert symName def $ symbols fdfl}
@@ -138,7 +156,7 @@ TokenParser {
   brackets = parseBrackets
 } = makeTokenParser fdflDef
 
-parseFDFL :: FDFLParser FDFL
+parseFDFL :: FDFLParser FDFLParseState
 parseFDFL =
   many parseAssignment >>
   eof >>
@@ -169,8 +187,8 @@ parseAssignment :: FDFLParser ()
 parseAssignment = do
   symbolName <- parseIdentifier
   _ <- parseReservedOp "="
-  state <- getState
-  newState <- parserFailEither $ addDefinition state symbolName <$> parseDefinition
+  oldState <- getState
+  newState <- (flip (Lens.set theFDFL) oldState) <$> (parserFailEither $ addDefinition (_theFDFL oldState) symbolName <$> parseDefinition)
   putState newState
   return ()
 
@@ -191,7 +209,7 @@ parseMeshDefinition :: FDFLParser Mesh
 parseMeshDefinition = do
   parseReserved "Mesh"
   attributeMap <- parserFailEither . parsecMap listToMap . parseParens $ parseCommaSep parseAttribute
-  fdfl <- getState
+  fdfl <- _theFDFL <$> getState
   case attributesToMesh fdfl attributeMap of
     Left str -> parserFail str
     Right mesh -> return mesh
@@ -203,7 +221,7 @@ parseFieldUpdateDefinition = do
   return $ FieldUpdate name value
   where
     parseArguments = do
-      fdfl <- getState
+      fdfl <- _theFDFL <$> getState
       field <- parserFailEither $ getFieldIdentifier fdfl <$> parseIdentifier
       _ <- parseComma
       value <- parseFieldExpr
@@ -211,14 +229,15 @@ parseFieldUpdateDefinition = do
 
 parseFieldExpr :: FDFLParser FieldExpr
 parseFieldExpr = do
-  fdfl <- getState
+  fdfl <- _theFDFL <$> getState
   FieldRef <$> (parserFailEither $ getFieldIdentifier fdfl <$> parseIdentifier)
 
 attributesToField :: Map String AttributeValue -> Either String Field
 attributesToField _map = do
   name <- getStringAttribute _map "name"
   rank <- getIntegerAttribute _map "rank"
-  return Field { fieldName = name, fieldRank = rank }
+  sym <- (getAttributeDefault False getBooleanAttribute) _map "symmetric"
+  return Field { fieldName = name, fieldRank = rank, fieldSymmetric = sym}
 
 attributesToMesh :: FDFL -> Map String AttributeValue -> Either String Mesh
 attributesToMesh fdfl _map = do
@@ -250,4 +269,4 @@ parseBool = choice
   ]
 
 parseInput :: String -> String -> Either ParseError FDFL
-parseInput = runParser parseFDFL emptyFDFL
+parseInput sourceName s = _theFDFL <$> runParser parseFDFL emptyFDFLParseState sourceName s
