@@ -23,7 +23,9 @@ data Mesh = Mesh {
 data Field = Field {
   fieldName :: String,
   fieldRank :: Integer,
-  fieldSymmetric :: Bool
+  fieldSymmetric :: Bool,
+  fieldTemporalStaggering :: [Bool],
+  fieldSpatialStaggering :: [[Bool]]
 } deriving Show
 
 data FieldUpdate = FieldUpdate String FieldExpr
@@ -38,12 +40,19 @@ data Definition
  | FieldUpdateDef FieldUpdate
  deriving Show
 
+data StaggerStrategy
+  = All
+  | None
+  | Dimension
+  deriving Show
+
 data FDFL = FDFL {
   symbols :: Map String Definition
 } deriving Show
 
 data FDFLParseState = FDFLParseState {
-  _theFDFL :: FDFL
+  _psFDFL :: FDFL,
+  psStaggering :: Map String StaggerStrategy
 } deriving Show
 
 Lens.makeLenses ''FDFLParseState
@@ -55,15 +64,14 @@ emptyFDFL = FDFL {
 
 emptyFDFLParseState :: FDFLParseState
 emptyFDFLParseState = FDFLParseState {
-  _theFDFL = emptyFDFL
+  _psFDFL = emptyFDFL,
+  psStaggering = Map.empty
 }
 
 type FDFLParser a = Parsec String FDFLParseState a
 
 data MeshUpdate = MeshUpdate String [FieldUpdate]
   deriving Show
-
-data StaggerStrategy = All | None | Dimension
 
 data AttributeValue
  = StringAttribute String
@@ -188,7 +196,7 @@ parseAssignment = do
   symbolName <- parseIdentifier
   _ <- parseReservedOp "="
   oldState <- getState
-  newState <- (flip (Lens.set theFDFL) oldState) <$> (parserFailEither $ addDefinition (_theFDFL oldState) symbolName <$> parseDefinition)
+  newState <- (flip (Lens.set psFDFL) oldState) <$> (parserFailEither $ addDefinition (_psFDFL oldState) symbolName <$> parseDefinition)
   putState newState
   return ()
 
@@ -209,7 +217,7 @@ parseMeshDefinition :: FDFLParser Mesh
 parseMeshDefinition = do
   parseReserved "Mesh"
   attributeMap <- parserFailEither . parsecMap listToMap . parseParens $ parseCommaSep parseAttribute
-  fdfl <- _theFDFL <$> getState
+  fdfl <- _psFDFL <$> getState
   case attributesToMesh fdfl attributeMap of
     Left str -> parserFail str
     Right mesh -> return mesh
@@ -221,7 +229,7 @@ parseFieldUpdateDefinition = do
   return $ FieldUpdate name value
   where
     parseArguments = do
-      fdfl <- _theFDFL <$> getState
+      fdfl <- _psFDFL <$> getState
       field <- parserFailEither $ getFieldIdentifier fdfl <$> parseIdentifier
       _ <- parseComma
       value <- parseFieldExpr
@@ -229,7 +237,7 @@ parseFieldUpdateDefinition = do
 
 parseFieldExpr :: FDFLParser FieldExpr
 parseFieldExpr = do
-  fdfl <- _theFDFL <$> getState
+  fdfl <- _psFDFL <$> getState
   FieldRef <$> (parserFailEither $ getFieldIdentifier fdfl <$> parseIdentifier)
 
 attributesToField :: Map String AttributeValue -> Either String Field
@@ -237,7 +245,13 @@ attributesToField _map = do
   name <- getStringAttribute _map "name"
   rank <- getIntegerAttribute _map "rank"
   sym <- (getAttributeDefault False getBooleanAttribute) _map "symmetric"
-  return Field { fieldName = name, fieldRank = rank, fieldSymmetric = sym}
+  return Field {
+    fieldName = name,
+    fieldRank = rank,
+    fieldSymmetric = sym,
+    fieldTemporalStaggering = [],
+    fieldSpatialStaggering = []
+  }
 
 attributesToMesh :: FDFL -> Map String AttributeValue -> Either String Mesh
 attributesToMesh fdfl _map = do
@@ -269,4 +283,4 @@ parseBool = choice
   ]
 
 parseInput :: String -> String -> Either ParseError FDFL
-parseInput sourceName s = _theFDFL <$> runParser parseFDFL emptyFDFLParseState sourceName s
+parseInput sourceName s = _psFDFL <$> runParser parseFDFL emptyFDFLParseState sourceName s
