@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, Rank2Types #-}
+{-# LANGUAGE TemplateHaskell, Rank2Types, FlexibleInstances #-}
 module FDGEN.Parser (parseInput) where
 import Data.Map (Map)
 import Control.Applicative ((<$>))
@@ -31,13 +31,24 @@ data Field = Field {
   _fieldStaggerStrategyTemporal :: StaggerStrategy
 } deriving Show
 
-data FieldUpdate = FieldUpdate {
-  _fieldUpdateLHS :: Identifier,
-  _fieldUpdateRHS :: Identifier
-} deriving Show
-
-data FieldExpr = FieldRef String
+data FieldExpr a
+  = FieldRef a
+  | FieldScalarConstant Double
+  | FieldAddition (FieldExpr a) (FieldExpr a)
+  | FieldDivision (FieldExpr a) (FieldExpr a)
+  | FieldInner (FieldExpr a) (FieldExpr a)
+  | FieldOuter (FieldExpr a) (FieldExpr a)
+  | FieldDot (FieldExpr a) (FieldExpr a)
+  | FieldGradient (FieldExpr a)
+  | FieldDivergence (FieldExpr a)
+  | FieldSpatialDerivative (FieldExpr a) Integer
+  | FieldTemporalDerivative (FieldExpr a)
   deriving Show
+
+data FieldUpdate = FieldUpdate {
+  _fieldUpdateLHS :: FieldExpr Identifier,
+  _fieldUpdateRHS :: FieldExpr Identifier
+} deriving Show
 
 data Definition
  = FieldDef Field
@@ -140,8 +151,8 @@ parseMesh = ObjectParseSpec "Mesh" []
 
 parseFieldUpdate :: ObjectParseSpec FieldUpdate
 parseFieldUpdate = ObjectParseSpec "FieldUpdate"
-  [ buildPositionalSpec "lhs" knownIdentifier fieldUpdateLHS
-  , buildPositionalSpec "rhs" knownIdentifier fieldUpdateRHS
+  [ buildPositionalSpec "lhs" alwaysValid fieldUpdateLHS
+  , buildPositionalSpec "rhs" alwaysValid fieldUpdateRHS
   ]
   []
 
@@ -223,6 +234,31 @@ class FDFLParsable a where
 instance FDFLParsable s => FDFLParsable [s] where
   parse = parseBrackets $ parseCommaSep parse
 
+instance FDFLParsable (FieldExpr Identifier) where
+  parse = choice [ FieldScalarConstant <$> parseFloat
+                 , parseUnary "grad" FieldGradient
+                 , parseUnary "div" FieldDivergence
+                 , parseUnary "Dt" FieldTemporalDerivative
+                 , parseBinary "inner" FieldInner
+                 , parseBinary "outer" FieldOuter
+                 , parseBinary "dot" FieldDot
+                 , parseUnary "Dx" $ flip FieldSpatialDerivative 0
+                 , parseUnary "Dy" $ flip FieldSpatialDerivative 1
+                 , parseUnary "Dz" $ flip FieldSpatialDerivative 2
+                 , FieldRef <$> parse
+                 ]
+          where
+          parseUnary name constructor =
+            parseReserved name >> constructor <$> parseParens parse
+          parseBinary name constructor =
+            parseReserved name >>
+            (uncurry constructor) <$> parseParens parsePair
+          parsePair = do
+            first <- parse
+            _ <- parseComma
+            second <- parse
+            return (first, second)
+
 parseBoundedEnum :: (Show a, Enum a, Bounded a) => FDFLParser a
 parseBoundedEnum = choice $ toParser <$> values
   where
@@ -274,7 +310,8 @@ TokenParser {
   comma = parseComma,
   stringLiteral = parseStringLiteral,
   integer = parseInteger,
-  brackets = parseBrackets
+  brackets = parseBrackets,
+  float = parseFloat
 } = makeTokenParser fdflDef
 
 parseFDFL :: FDFLParser FDFLParseState
