@@ -1,6 +1,7 @@
 {-# LANGUAGE TemplateHaskell, Rank2Types, FlexibleInstances #-}
 module FDGEN.Parser (parseInput) where
 import Data.Map (Map)
+import Data.Maybe (isJust)
 import Control.Applicative ((<$>))
 import Text.Parsec.Char (letter)
 import Text.Parsec.Combinator (eof, choice, optionMaybe)
@@ -10,12 +11,13 @@ import Text.Parsec.Prim (many, parserFail)
 import Text.Parsec.Token (GenTokenParser(..), GenLanguageDef(..), makeTokenParser)
 import qualified Control.Lens as Lens
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 
 data Identifier = Identifier String
-  deriving Show
+  deriving (Show, Ord, Eq)
 
 data StringLiteral = StringLiteral String
-  deriving Show
+  deriving (Show, Ord, Eq)
 
 data Mesh = Mesh {
   _meshName :: StringLiteral,
@@ -114,6 +116,18 @@ alwaysValid = return
 validateList :: Validator a -> Validator [a]
 validateList = mapM
 
+findDuplicates :: Ord a => [a] -> [a]
+findDuplicates keys = Map.keys $ Map.filter (> 1) histogram
+  where
+  insertWith' m (k, a) = Map.insertWith (+) k a m
+  histogram = foldl insertWith' Map.empty [(k, 1::Integer) | k <- keys]
+
+noDuplicates :: (Show a, Ord a) => Validator [a]
+noDuplicates entries = do
+  case findDuplicates entries of
+   [] -> return entries
+   (firstDuplicate:_) -> parserFail $ "Unexpected duplicate entry: " ++ show firstDuplicate
+
 knownIdentifier :: Validator Identifier
 knownIdentifier (Identifier name) = do
   state <- getState
@@ -121,6 +135,15 @@ knownIdentifier (Identifier name) = do
   if containsSymbol fdfl name
     then return $ Identifier name
     else parserFail $ "Unknown identifer " ++ name
+
+isField :: Validator Identifier
+isField ident = do
+  state <- getState
+  let fdfl = _psFDFL state
+  (Identifier name) <- knownIdentifier ident
+  case getSymbol fdfl name of
+    Just (FieldDef _) -> return ident
+    _ -> parserFail $ name ++ " should be a field, but is not."
 
 parseKeywordParam :: FDFLParsable a => String -> Validator a
   -> Lens.Setter' s a -> FDFLParser (AttributeUpdate s)
@@ -146,7 +169,7 @@ parseMesh :: ObjectParseSpec Mesh
 parseMesh = ObjectParseSpec "Mesh" []
   [ buildAttributeSpec "name" True alwaysValid meshName
   , buildAttributeSpec "dimension" True alwaysValid meshDimension
-  , buildAttributeSpec "fields" True (validateList knownIdentifier) meshFields
+  , buildAttributeSpec "fields" True (validateList isField) meshFields
   ]
 
 parseFieldUpdate :: ObjectParseSpec FieldUpdate
@@ -165,11 +188,10 @@ validateAttributes specs updates = if not $ null duplicateAttributes
     else Right updates
   where
   reqAttributes = [name | AttributeSpec name req _ <- specs, req]
-  missing = [name | name <- reqAttributes, not $ Map.member name present]
-  insertWith' m (k, a) = Map.insertWith (+) k a m
+  present = Set.fromList attributeNames
+  missing = [name | name <- reqAttributes, not $ Set.member name present]
   attributeNames = [name | AttributeUpdate name _ <- updates]
-  present = foldl insertWith' Map.empty  [(name, 1::Integer) | name <- attributeNames]
-  duplicateAttributes = Map.keys $ Map.filter (> 1) present
+  duplicateAttributes = findDuplicates attributeNames
 
 parseCommaSepSeq :: [FDFLParser a] -> FDFLParser [a]
 parseCommaSepSeq [] = return []
@@ -245,7 +267,7 @@ instance FDFLParsable (FieldExpr Identifier) where
                  , parseUnary "Dx" $ flip FieldSpatialDerivative 0
                  , parseUnary "Dy" $ flip FieldSpatialDerivative 1
                  , parseUnary "Dz" $ flip FieldSpatialDerivative 2
-                 , FieldRef <$> parse
+                 , FieldRef <$> (parse >>= isField)
                  ]
           where
           parseUnary name constructor =
@@ -285,7 +307,10 @@ instance FDFLParsable Integer where
 --
 
 containsSymbol :: FDFL -> String -> Bool
-containsSymbol fdfl sym = Map.member sym $ symbols fdfl
+containsSymbol fdfl = isJust . getSymbol fdfl
+
+getSymbol :: FDFL -> String -> Maybe Definition
+getSymbol fdfl sym = Map.lookup sym (symbols fdfl)
 
 addDefinition :: FDFL -> String -> Definition -> Either String FDFL
 addDefinition fdfl symName def = if containsSymbol fdfl symName
