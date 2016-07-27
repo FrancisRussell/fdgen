@@ -3,11 +3,13 @@ module FDGEN.Parser (parseInput) where
 import Data.Map (Map)
 import Data.Maybe (isJust)
 import Control.Applicative ((<$>))
+import Control.Monad ((>=>))
 import Text.Parsec.Char (letter)
 import Text.Parsec.Combinator (eof, choice, optionMaybe)
 import Text.Parsec.Language (emptyDef, LanguageDef)
 import Text.Parsec (ParsecT, ParseError, runParser, getState, Parsec, putState)
 import Text.Parsec.Prim (many, parserFail)
+import Text.Parsec.Expr (buildExpressionParser, Operator(..), Assoc(..))
 import Text.Parsec.Token (GenTokenParser(..), GenLanguageDef(..), makeTokenParser)
 import qualified Control.Lens as Lens
 import qualified Data.Map as Map
@@ -169,7 +171,7 @@ parseMesh :: ObjectParseSpec Mesh
 parseMesh = ObjectParseSpec "Mesh" []
   [ buildAttributeSpec "name" True alwaysValid meshName
   , buildAttributeSpec "dimension" True alwaysValid meshDimension
-  , buildAttributeSpec "fields" True (validateList isField) meshFields
+  , buildAttributeSpec "fields" True (validateList isField >=> noDuplicates) meshFields
   ]
 
 parseFieldUpdate :: ObjectParseSpec FieldUpdate
@@ -257,7 +259,9 @@ instance FDFLParsable s => FDFLParsable [s] where
   parse = parseBrackets $ parseCommaSep parse
 
 instance FDFLParsable (FieldExpr Identifier) where
-  parse = choice [ FieldScalarConstant <$> parseFloat
+  parse = expr
+    where expr = buildExpressionParser table term
+          term = choice [ FieldScalarConstant <$> parseFloat
                  , parseUnary "grad" FieldGradient
                  , parseUnary "div" FieldDivergence
                  , parseUnary "Dt" FieldTemporalDerivative
@@ -268,8 +272,8 @@ instance FDFLParsable (FieldExpr Identifier) where
                  , parseUnary "Dy" $ flip FieldSpatialDerivative 1
                  , parseUnary "Dz" $ flip FieldSpatialDerivative 2
                  , FieldRef <$> (parse >>= isField)
+                 , parseParens expr
                  ]
-          where
           parseUnary name constructor =
             parseReserved name >> constructor <$> parseParens parse
           parseBinary name constructor =
@@ -280,6 +284,15 @@ instance FDFLParsable (FieldExpr Identifier) where
             _ <- parseComma
             second <- parse
             return (first, second)
+          table = [ [ Prefix $ parseSymbol "-" >> return negate' ]
+                  , [ Infix (parseSymbol "*" >> return FieldOuter) AssocLeft
+                    , Infix (parseSymbol "/" >> return FieldDivision) AssocLeft
+                    ]
+                  , [ Infix (parseSymbol "+" >> return FieldAddition) AssocLeft
+                    , Infix (parseSymbol "-" >> return (\a -> FieldAddition a . negate')) AssocLeft
+                    ]
+                  ]
+          negate' = FieldOuter $ FieldScalarConstant (-1.0)
 
 parseBoundedEnum :: (Show a, Enum a, Bounded a) => FDFLParser a
 parseBoundedEnum = choice $ toParser <$> values
@@ -336,7 +349,8 @@ TokenParser {
   stringLiteral = parseStringLiteral,
   integer = parseInteger,
   brackets = parseBrackets,
-  float = parseFloat
+  float = parseFloat,
+  symbol = parseSymbol
 } = makeTokenParser fdflDef
 
 parseFDFL :: FDFLParser FDFLParseState
