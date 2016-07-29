@@ -4,7 +4,7 @@ import Data.Map (Map)
 import Data.Maybe (isJust)
 import Control.Applicative ((<$>))
 import Control.Monad ((>=>))
-import Text.Parsec.Char (letter)
+import Text.Parsec.Char (letter, spaces)
 import Text.Parsec.Combinator (eof, choice, optionMaybe)
 import Text.Parsec.Language (emptyDef, LanguageDef)
 import Text.Parsec (ParsecT, ParseError, runParser, getState, Parsec, putState)
@@ -37,7 +37,7 @@ data Field = Field {
 
 data FieldExpr a
   = FieldRef a
-  | FieldScalarConstant Double
+  | FieldLiteral LiteralConstant
   | FieldAddition (FieldExpr a) (FieldExpr a)
   | FieldDivision (FieldExpr a) (FieldExpr a)
   | FieldInner (FieldExpr a) (FieldExpr a)
@@ -49,7 +49,17 @@ data FieldExpr a
   | FieldTemporalDerivative (FieldExpr a)
   deriving Show
 
-data FieldUpdate = FieldUpdate {
+data LiteralConstant
+  = ScalarConstant Double
+  | PermutationSymbol
+  deriving Show
+
+data Constant = Constant {
+  _constantRank :: Integer,
+  _constantName :: StringLiteral
+} deriving Show
+
+data Equation = Equation {
   _fieldUpdateLHS :: FieldExpr Identifier,
   _fieldUpdateRHS :: FieldExpr Identifier
 } deriving Show
@@ -57,7 +67,9 @@ data FieldUpdate = FieldUpdate {
 data Definition
  = FieldDef Field
  | MeshDef Mesh
- | FieldUpdateDef FieldUpdate
+ | EquationDef Equation
+ | ConstantDef Constant
+ | FieldExprDef (FieldExpr Identifier)
  deriving Show
 
 data StaggerStrategy
@@ -77,7 +89,8 @@ data FDFLParseState = FDFLParseState {
 Lens.makeLenses ''FDFLParseState
 Lens.makeLenses ''Mesh
 Lens.makeLenses ''Field
-Lens.makeLenses ''FieldUpdate
+Lens.makeLenses ''Equation
+Lens.makeLenses ''Constant
 
 emptyFDFL :: FDFL
 emptyFDFL = FDFL {
@@ -138,13 +151,15 @@ knownIdentifier (Identifier name) = do
     then return $ Identifier name
     else parserFail $ "Unknown identifer " ++ name
 
-isField :: Validator Identifier
-isField ident = do
+isFieldLike :: Validator Identifier
+isFieldLike ident = do
   state <- getState
   let fdfl = _psFDFL state
   (Identifier name) <- knownIdentifier ident
   case getSymbol fdfl name of
     Just (FieldDef _) -> return ident
+    Just (FieldExprDef _) -> return ident
+    Just (ConstantDef _) -> return ident
     _ -> parserFail $ name ++ " should be a field, but is not."
 
 parseKeywordParam :: FDFLParsable a => String -> Validator a
@@ -171,15 +186,23 @@ parseMesh :: ObjectParseSpec Mesh
 parseMesh = ObjectParseSpec "Mesh" []
   [ buildAttributeSpec "name" True alwaysValid meshName
   , buildAttributeSpec "dimension" True alwaysValid meshDimension
-  , buildAttributeSpec "fields" True (validateList isField >=> noDuplicates) meshFields
+  , buildAttributeSpec "fields" True (validateList isFieldLike >=> noDuplicates) meshFields
   ]
 
-parseFieldUpdate :: ObjectParseSpec FieldUpdate
-parseFieldUpdate = ObjectParseSpec "FieldUpdate"
+parseEquation :: ObjectParseSpec Equation
+parseEquation = ObjectParseSpec "Equation"
   [ buildPositionalSpec "lhs" alwaysValid fieldUpdateLHS
   , buildPositionalSpec "rhs" alwaysValid fieldUpdateRHS
   ]
   []
+
+parseConstant :: ObjectParseSpec Constant
+parseConstant = ObjectParseSpec "Constant"
+  []
+  [ buildAttributeSpec "name" True alwaysValid constantName
+  , buildAttributeSpec "rank" False alwaysValid constantRank
+  ]
+
 
 validateAttributes :: [AttributeSpec s] -> [AttributeUpdate s]
   -> Either String [AttributeUpdate s]
@@ -245,11 +268,18 @@ instance FDFLObject Mesh where
       _meshFields = []
     }
 
-instance FDFLObject FieldUpdate where
-  wrapObject = FieldUpdateDef
-  emptyObject = FieldUpdate {
+instance FDFLObject Equation where
+  wrapObject = EquationDef
+  emptyObject = Equation {
     _fieldUpdateLHS = error "undefined fieldUpdateLHS",
     _fieldUpdateRHS = error "undefined fieldUpdateRHS"
+  }
+
+instance FDFLObject Constant where
+  wrapObject = ConstantDef
+  emptyObject = Constant {
+    _constantName = error "undefined constantName",
+    _constantRank = 0
   }
 
 class FDFLParsable a where
@@ -261,9 +291,9 @@ instance FDFLParsable s => FDFLParsable [s] where
 instance FDFLParsable (FieldExpr Identifier) where
   parse = expr
     where expr = buildExpressionParser table term
-          term = choice [ FieldScalarConstant <$> parseFloat
-                 , parseUnary "grad" FieldGradient
+          term = choice [ parseUnary "grad" FieldGradient
                  , parseUnary "div" FieldDivergence
+                 , parseUnary "laplace" (FieldDivergence . FieldGradient)
                  , parseUnary "Dt" FieldTemporalDerivative
                  , parseBinary "inner" FieldInner
                  , parseBinary "outer" FieldOuter
@@ -271,7 +301,8 @@ instance FDFLParsable (FieldExpr Identifier) where
                  , parseUnary "Dx" $ flip FieldSpatialDerivative 0
                  , parseUnary "Dy" $ flip FieldSpatialDerivative 1
                  , parseUnary "Dz" $ flip FieldSpatialDerivative 2
-                 , FieldRef <$> (parse >>= isField)
+                 , FieldLiteral <$> parse
+                 , FieldRef <$> (parse >>= isFieldLike)
                  , parseParens expr
                  ]
           parseUnary name constructor =
@@ -292,7 +323,7 @@ instance FDFLParsable (FieldExpr Identifier) where
                     , Infix (parseSymbol "-" >> return (\a -> FieldAddition a . negate')) AssocLeft
                     ]
                   ]
-          negate' = FieldOuter $ FieldScalarConstant (-1.0)
+          negate' = FieldOuter . FieldLiteral . ScalarConstant $ -1.0
 
 parseBoundedEnum :: (Show a, Enum a, Bounded a) => FDFLParser a
 parseBoundedEnum = choice $ toParser <$> values
@@ -315,9 +346,13 @@ instance FDFLParsable Identifier where
 instance FDFLParsable Integer where
   parse = parseInteger
 
---data MeshUpdate = MeshUpdate String [FieldUpdate]
---  deriving Show
---
+instance FDFLParsable LiteralConstant where
+  parse = choice [ parseNullary "Permutation" PermutationSymbol
+          , ScalarConstant <$> parseFloat
+          ]
+    where
+      parseNullary name constructor =
+        parseReserved name >> const constructor <$> parseParens spaces
 
 containsSymbol :: FDFL -> String -> Bool
 containsSymbol fdfl = isJust . getSymbol fdfl
@@ -381,7 +416,9 @@ parseDefinition :: FDFLParser Definition
 parseDefinition = choice
   [ parseSpecToParser parseField
   , parseSpecToParser parseMesh
-  , parseSpecToParser parseFieldUpdate
+  , parseSpecToParser parseEquation
+  , parseSpecToParser parseConstant
+  , FieldExprDef <$> parse
   ]
 
 parseInput :: String -> String -> Either ParseError FDFL
