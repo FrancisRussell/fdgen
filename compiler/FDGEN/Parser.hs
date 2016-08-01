@@ -24,7 +24,8 @@ data StringLiteral = StringLiteral String
 data Mesh = Mesh {
   _meshName :: StringLiteral,
   _meshDimension :: Integer,
-  _meshFields :: [Identifier]
+  _meshFields :: [Identifier],
+  _meshSolves :: [Identifier]
 } deriving Show
 
 data Field = Field {
@@ -64,12 +65,20 @@ data Equation = Equation {
   _fieldUpdateRHS :: FieldExpr Identifier
 } deriving Show
 
+data Solve = Solve {
+  _solveName :: StringLiteral,
+  _solveSpatialOrder :: Integer,
+  _solveTemporalOrder :: Integer,
+  _solveEquations :: [Identifier]
+} deriving Show
+
 data Definition
  = FieldDef Field
  | MeshDef Mesh
  | EquationDef Equation
  | ConstantDef Constant
  | FieldExprDef (FieldExpr Identifier)
+ | SolveDef Solve
  deriving Show
 
 data StaggerStrategy
@@ -91,6 +100,7 @@ Lens.makeLenses ''Mesh
 Lens.makeLenses ''Field
 Lens.makeLenses ''Equation
 Lens.makeLenses ''Constant
+Lens.makeLenses ''Solve
 
 emptyFDFL :: FDFL
 emptyFDFL = FDFL {
@@ -143,24 +153,37 @@ noDuplicates entries = do
    [] -> return entries
    (firstDuplicate:_) -> parserFail $ "Unexpected duplicate entry: " ++ show firstDuplicate
 
-knownIdentifier :: Validator Identifier
-knownIdentifier (Identifier name) = do
+validateDefinition :: (Definition -> Bool) -> String -> Validator Identifier
+validateDefinition validate friendlyType (Identifier name) = do
   state <- getState
   let fdfl = _psFDFL state
-  if containsSymbol fdfl name
-    then return $ Identifier name
-    else parserFail $ "Unknown identifer " ++ name
+  case getSymbol fdfl name of
+    Nothing -> parserFail $ "Unknown identifier " ++ name
+    Just def -> if validate def
+      then return $ Identifier name
+      else parserFail $ name ++ "should be of type " ++ friendlyType ++ " but is not."
+
+knownIdentifier :: Validator Identifier
+knownIdentifier = validateDefinition (const True) "any"
 
 isFieldLike :: Validator Identifier
-isFieldLike ident = do
-  state <- getState
-  let fdfl = _psFDFL state
-  (Identifier name) <- knownIdentifier ident
-  case getSymbol fdfl name of
-    Just (FieldDef _) -> return ident
-    Just (FieldExprDef _) -> return ident
-    Just (ConstantDef _) -> return ident
-    _ -> parserFail $ name ++ " should be a field, but is not."
+isFieldLike = validateDefinition validate "field"
+  where validate def = case def of
+                         FieldDef _ -> True
+                         FieldExprDef _ -> True
+                         ConstantDef _ -> True
+                         _ -> False
+isSolve :: Validator Identifier
+isSolve = validateDefinition validate "solve"
+  where validate def = case def of
+                         SolveDef _ -> True
+                         _ -> False
+
+isEquation :: Validator Identifier
+isEquation = validateDefinition validate "equation"
+  where validate def = case def of
+                         EquationDef _ -> True
+                         _ -> False
 
 parseKeywordParam :: FDFLParsable a => String -> Validator a
   -> Lens.Setter' s a -> FDFLParser (AttributeUpdate s)
@@ -187,6 +210,7 @@ parseMesh = ObjectParseSpec "Mesh" []
   [ buildAttributeSpec "name" True alwaysValid meshName
   , buildAttributeSpec "dimension" True alwaysValid meshDimension
   , buildAttributeSpec "fields" True (validateList isFieldLike >=> noDuplicates) meshFields
+  , buildAttributeSpec "solves" True (validateList isSolve >=> noDuplicates) meshSolves
   ]
 
 parseEquation :: ObjectParseSpec Equation
@@ -203,6 +227,14 @@ parseConstant = ObjectParseSpec "Constant"
   , buildAttributeSpec "rank" False alwaysValid constantRank
   ]
 
+parseSolve :: ObjectParseSpec Solve
+parseSolve = ObjectParseSpec "Solve"
+  []
+  [ buildAttributeSpec "name" True alwaysValid solveName
+  , buildAttributeSpec "spatial_order" False alwaysValid solveSpatialOrder
+  , buildAttributeSpec "temporal_order" False alwaysValid solveTemporalOrder
+  , buildAttributeSpec "equations" False (validateList isEquation >=> noDuplicates) solveEquations
+  ]
 
 validateAttributes :: [AttributeSpec s] -> [AttributeUpdate s]
   -> Either String [AttributeUpdate s]
@@ -265,7 +297,8 @@ instance FDFLObject Mesh where
   emptyObject = Mesh {
       _meshName = error "undefined meshName",
       _meshDimension = error "undefined meshDimension",
-      _meshFields = []
+      _meshFields = [],
+      _meshSolves = []
     }
 
 instance FDFLObject Equation where
@@ -280,6 +313,15 @@ instance FDFLObject Constant where
   emptyObject = Constant {
     _constantName = error "undefined constantName",
     _constantRank = 0
+  }
+
+instance FDFLObject Solve where
+  wrapObject = SolveDef
+  emptyObject = Solve {
+    _solveName = error "undefined solveName",
+    _solveSpatialOrder = 1,
+    _solveTemporalOrder = 1,
+    _solveEquations = []
   }
 
 class FDFLParsable a where
@@ -418,6 +460,7 @@ parseDefinition = choice
   , parseSpecToParser parseMesh
   , parseSpecToParser parseEquation
   , parseSpecToParser parseConstant
+  , parseSpecToParser parseSolve
   , FieldExprDef <$> parse
   ]
 
