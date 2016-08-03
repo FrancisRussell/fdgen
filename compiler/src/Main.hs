@@ -1,5 +1,7 @@
 module Main (main) where
 import System.Environment (getArgs)
+import System.IO (hPutStrLn, stderr)
+import System.Exit (exitFailure)
 import FDGEN.Parser (parseInput)
 
 main :: IO()
@@ -14,5 +16,5 @@ processFile filename = do
   contents <- readFile filename
   let result = parseInput filename contents in
     case result of
-      Left err -> putStrLn $ show err
+      Left err -> hPutStrLn stderr (show err) >> exitFailure
       Right spec -> putStrLn $ show spec
