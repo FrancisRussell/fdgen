@@ -3,6 +3,7 @@ import System.Environment (getArgs)
 import System.IO (hPutStrLn, stderr)
 import System.Exit (exitFailure)
 import FDGEN.Parser (parseInput)
+import FDGEN.Algebra ()
 
 main :: IO()
 main = getArgs >>= processFile . getFileName
