@@ -2,6 +2,9 @@
 module FDGEN.Algebra (Expression(..)) where
 import Data.Map (Map)
 import Data.Ratio ((%), denominator, numerator)
+import FDGEN.Pretty (PrettyPrintable(..))
+import Text.PrettyPrint (Doc, hcat, char, parens, punctuate)
+import Control.Applicative ((<$>))
 import qualified Data.Map as Map
 import qualified Control.Lens as Lens
 
@@ -187,3 +190,76 @@ instance Ord e => Num (Expression e) where
 instance Ord e => Fractional (Expression e) where
   fromRational = ConstantRational
   (/) a = simplify . divide a
+
+data Precedence
+ = AddPrec
+ | MulPrec
+ | PowPrec
+ | TerminalPrec
+ deriving (Eq, Ord, Show)
+
+data Assoc
+ = LeftAssoc
+ | RightAssoc
+ | NoAssoc
+ deriving (Eq, Show)
+
+pAssoc :: PDoc -> Assoc
+pAssoc (PDoc _ a _) = a
+
+pPrec :: PDoc -> Precedence
+pPrec (PDoc _ _ p) = p
+
+pDoc :: PDoc -> Doc
+pDoc (PDoc d _ _) = d
+
+data PDoc = PDoc Doc Assoc Precedence
+
+instance PrettyPrintable e => PrettyPrintable (Expression e) where
+  toDoc expr = pDoc $ toPDoc expr
+    where
+    renderTerminal :: PrettyPrintable a => a -> PDoc
+    renderTerminal t = PDoc (toDoc t) NoAssoc TerminalPrec
+    renderInteger :: Integer -> PDoc
+    renderInteger i = if i >= 0
+      then PDoc (toDoc i) NoAssoc TerminalPrec
+      else PDoc (hcat [char '-', toDoc (-i)]) NoAssoc AddPrec
+    renderRational r = case denominator r of
+       1 -> renderInteger $ numerator r
+       _ -> renderDivision (renderInteger $ numerator r) (renderInteger $ denominator r)
+    renderBinary :: String -> Assoc -> Precedence -> PDoc -> PDoc -> PDoc
+    renderBinary op assoc prec left right = PDoc resultDoc assoc prec
+      where
+      doBracketing term = if pPrec term > prec || pPrec term == prec && pAssoc term == assoc
+        then pDoc term
+        else parens $ pDoc term
+      leftDoc = doBracketing left
+      rightDoc = doBracketing right
+      resultDoc = hcat [leftDoc, toDoc op, rightDoc]
+    renderDivision = renderBinary "/" LeftAssoc MulPrec
+    renderMultiplication = renderBinary "*" LeftAssoc MulPrec
+    renderAddition = renderBinary "+" LeftAssoc MulPrec
+    renderPower = renderBinary "^" RightAssoc PowPrec
+    renderPairSeq :: (PairSeqLike t c, PrettyPrintable c) => PairSeq t c -> (PDoc -> PDoc -> PDoc) -> (PDoc -> PDoc -> PDoc) -> PDoc
+    renderPairSeq seq' renderPair combineTerms = if Map.null $ _psTerms seq'
+      then renderRational $ _psOverall seq'
+      else foldl1 combineTerms renderedTerms
+      where
+      base = if hasNullOverall seq'
+        then []
+        else [renderRational $ _psOverall seq']
+      renderPair' (e, c) = if c == 1
+        then toPDoc e
+        else renderPair (toPDoc e) (renderRational c)
+      renderedTerms = (renderPair' <$> (Map.assocs $ _psTerms seq')) ++ base
+    renderFunction name args = renderTerminal call
+      where
+      call = hcat [toDoc name, parens . hcat . punctuate (toDoc ", ") $ pDoc <$> args]
+    toPDoc expr' = case expr' of
+      Symbol s -> renderTerminal s
+      ConstantFloat f -> renderTerminal f
+      ConstantRational r -> renderRational r
+      Sum seq' -> renderPairSeq seq' renderMultiplication renderAddition
+      Product seq' -> renderPairSeq seq' renderPower renderMultiplication
+      Abs e -> renderFunction "abs" [toPDoc e]
+      Signum e -> renderFunction "signum" [toPDoc e]
