@@ -162,11 +162,16 @@ hasNullOverall seq' = (_psOverall seq') == (_psOverall (empty :: PairSeq t e))
 simplify :: Ord e => Expression e -> Expression e
 simplify (Product seq') = simplifyPairSeq seq'
 simplify (Sum seq') = simplifyPairSeq seq'
-simplify (Abs (ConstantRational r)) = ConstantRational $ abs r
-simplify (Signum (ConstantRational r)) = ConstantRational $ signum r
-simplify (Abs (ConstantFloat f)) = ConstantFloat $ abs f
-simplify (Signum (ConstantFloat f)) = ConstantFloat $ signum f
-simplify a = a
+simplify (Abs e) = simplify' . Abs $ simplify e
+simplify (Signum e) = simplify' . Signum $ simplify e
+simplify e = simplify' e
+
+simplify' :: Ord e => Expression e -> Expression e
+simplify' (Abs (ConstantRational r)) = ConstantRational $ abs r
+simplify' (Abs (ConstantFloat f)) = ConstantFloat $ abs f
+simplify' (Signum (ConstantRational r)) = ConstantRational $ signum r
+simplify' (Signum (ConstantFloat f)) = ConstantFloat $ signum f
+simplify' e = e
 
 simplifyPairSeq :: (PairSeqLike t e, Ord e) => PairSeq t e -> Expression e
 simplifyPairSeq seq' = newExpr
@@ -252,6 +257,7 @@ instance PrettyPrintable e => PrettyPrintable (Expression e) where
         then toPDoc e
         else renderPair (toPDoc e) (renderRational c)
       renderedTerms = (renderPair' <$> (Map.assocs $ _psTerms seq')) ++ base
+    renderFunction :: String -> [PDoc] -> PDoc
     renderFunction name args = renderTerminal call
       where
       call = hcat [toDoc name, parens . hcat . punctuate (toDoc ", ") $ pDoc <$> args]
