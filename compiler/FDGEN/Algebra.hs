@@ -91,14 +91,11 @@ instance PairSeqLike SumTag e where
       where
       (multiplier, expr') = extractMultiplier expr
   wrap = Sum
-  addTerm expr coeff seq' = newSeq
-    where
-    newSeq = case expr of
+  addTerm expr coeff seq' = case expr of
       ConstantRational r -> Lens.over psOverall (+ (r * coeff)) seq'
-      Sum subSeq -> Map.foldlWithKey addTerm' incorporateOverall (_psTerms subSeq)
+      Sum subSeq -> foldl addTerm' seq' (asPairs subSeq)
        where
-       incorporateOverall = addTerm (ConstantRational $ _psOverall subSeq) coeff seq'
-       addTerm' s e c = addTerm e (c * coeff) s
+       addTerm' s (e, c) = addTerm e (c * coeff) s
       _ -> normalInsert
       where
       normalInsert = incrementTerm expr coeff seq'
@@ -127,10 +124,9 @@ instance PairSeqLike ProdTag e where
     newSeq = if isIntegerCoeff
       then case expr of
         ConstantRational r -> Lens.over psOverall (* (r ^^ numerator coeff)) seq'
-        Product subSeq -> Map.foldlWithKey addTerm' incorporateOverall (_psTerms subSeq)
+        Product subSeq -> foldl addTerm' seq' (asPairs subSeq)
          where
-         incorporateOverall = addTerm (ConstantRational $ _psOverall subSeq) coeff seq'
-         addTerm' s e c = addTerm e (c * coeff) s
+         addTerm' s (e, c) = addTerm e (c * coeff) s
         _ -> normalInsert
       else normalInsert
       where
@@ -139,22 +135,30 @@ instance PairSeqLike ProdTag e where
 incrementTerm :: Ord e => Expression e -> Rational -> PairSeq t e -> PairSeq t e
 incrementTerm expr coeff = Lens.over psTerms (Map.insertWith (+) expr coeff)
 
+asPairs :: PairSeqLike t e => PairSeq t e -> [(Expression e, Rational)]
+asPairs seq' = if hasNullOverall seq'
+  then terms
+  else overall:terms
+  where
+  overall = (ConstantRational $ _psOverall seq', 1)
+  terms = Map.assocs $ _psTerms seq'
+
 removeZeros :: PairSeq t e -> PairSeq t e
 removeZeros seq' = seq' { _psTerms = terms' }
   where
   terms' = Map.filter (/= 0) $ _psTerms seq'
 
 add :: Ord e => Expression e -> Expression e -> Expression e
-add a b = Sum $ foldr (uncurry addTerm) empty [(a, 1), (b, 1)]
+add a b = Sum $ foldl (flip $ uncurry addTerm) empty [(a, 1), (b, 1)]
 
 sub :: Ord e => Expression e -> Expression e -> Expression e
-sub a b = Sum $ foldr (uncurry addTerm) empty [(a, 1), (b, -1)]
+sub a b = Sum $ foldl (flip $ uncurry addTerm) empty [(a, 1), (b, -1)]
 
 mul :: Ord e => Expression e -> Expression e -> Expression e
-mul a b = Product $ foldr (uncurry addTerm) empty [(a, 1), (b, 1)]
+mul a b = Product $ foldl (flip $ uncurry addTerm) empty [(a, 1), (b, 1)]
 
 divide :: Ord e => Expression e -> Expression e -> Expression e
-divide a b = Sum $ foldr (uncurry addTerm) empty [(a, 1), (b, -1)]
+divide a b = Sum $ foldl (flip $ uncurry addTerm) empty [(a, 1), (b, -1)]
 
 hasNullOverall :: forall t e . PairSeqLike t e => PairSeq t e -> Bool
 hasNullOverall seq' = (_psOverall seq') == (_psOverall (empty :: PairSeq t e))
