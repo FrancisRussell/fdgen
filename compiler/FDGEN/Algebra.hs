@@ -1,7 +1,8 @@
 {-# LANGUAGE TemplateHaskell, EmptyDataDecls, FlexibleInstances, MultiParamTypeClasses, ScopedTypeVariables #-}
 module FDGEN.Algebra (Expression(..)) where
-import Data.Map (Map)
+import Data.Map.Strict (Map)
 import Data.Ratio ((%), denominator, numerator)
+import Data.Foldable (foldl')
 import FDGEN.Pretty (PrettyPrintable(..))
 import Text.PrettyPrint (Doc, hcat, char, parens, punctuate)
 import Control.Applicative ((<$>))
@@ -70,7 +71,7 @@ extractMultiplier (Sum seq') = case _psRewriteState seq' of
        overall = _psOverall normalised
        terms = _psTerms normalised
        gcd' r1 r2 = (gcd (numerator r1) (numerator r2)) % (gcd (denominator r1) (denominator r2))
-       common = foldl gcd' 1 (overall:(Map.elems terms))
+       common = foldl' gcd' 1 (overall:(Map.elems terms))
        overall' = (_psOverall normalised) / common
        terms' = Map.map (/ common) $ _psTerms normalised
        updated :: PairSeq SumTag e
@@ -93,7 +94,7 @@ instance PairSeqLike SumTag e where
   wrap = Sum
   addTerm expr coeff seq' = case expr of
       ConstantRational r -> Lens.over psOverall (+ (r * coeff)) seq'
-      Sum subSeq -> foldl addTerm' seq' (asPairs subSeq)
+      Sum subSeq -> foldl' addTerm' seq' (asPairs subSeq)
        where
        addTerm' s (e, c) = addTerm e (c * coeff) s
       _ -> normalInsert
@@ -115,7 +116,7 @@ instance PairSeqLike ProdTag e where
       (multiplier, expr') = extractMultiplier expr
       isIntegerCoeff = denominator coeff == 1
       newSeq = if isIntegerCoeff
-        then foldl (flip $ uncurry addTerm) ps [(ConstantRational multiplier, coeff), (expr', coeff)]
+        then foldl' (flip $ uncurry addTerm) ps [(ConstantRational multiplier, coeff), (expr', coeff)]
         else addTerm expr coeff ps
   wrap = Product
   addTerm expr coeff seq' = newSeq
@@ -124,7 +125,7 @@ instance PairSeqLike ProdTag e where
     newSeq = if isIntegerCoeff
       then case expr of
         ConstantRational r -> Lens.over psOverall (* (r ^^ numerator coeff)) seq'
-        Product subSeq -> foldl addTerm' seq' (asPairs subSeq)
+        Product subSeq -> foldl' addTerm' seq' (asPairs subSeq)
          where
          addTerm' s (e, c) = addTerm e (c * coeff) s
         _ -> normalInsert
@@ -149,16 +150,16 @@ removeZeros seq' = seq' { _psTerms = terms' }
   terms' = Map.filter (/= 0) $ _psTerms seq'
 
 add :: Ord e => Expression e -> Expression e -> Expression e
-add a b = Sum $ foldl (flip $ uncurry addTerm) empty [(a, 1), (b, 1)]
+add a b = Sum $ foldl' (flip $ uncurry addTerm) empty [(a, 1), (b, 1)]
 
 sub :: Ord e => Expression e -> Expression e -> Expression e
-sub a b = Sum $ foldl (flip $ uncurry addTerm) empty [(a, 1), (b, -1)]
+sub a b = Sum $ foldl' (flip $ uncurry addTerm) empty [(a, 1), (b, -1)]
 
 mul :: Ord e => Expression e -> Expression e -> Expression e
-mul a b = Product $ foldl (flip $ uncurry addTerm) empty [(a, 1), (b, 1)]
+mul a b = Product $ foldl' (flip $ uncurry addTerm) empty [(a, 1), (b, 1)]
 
 divide :: Ord e => Expression e -> Expression e -> Expression e
-divide a b = Sum $ foldl (flip $ uncurry addTerm) empty [(a, 1), (b, -1)]
+divide a b = Sum $ foldl' (flip $ uncurry addTerm) empty [(a, 1), (b, -1)]
 
 hasNullOverall :: forall t e . PairSeqLike t e => PairSeq t e -> Bool
 hasNullOverall seq' = (_psOverall seq') == (_psOverall (empty :: PairSeq t e))
@@ -274,7 +275,7 @@ instance PrettyPrintable e => PrettyPrintable (Expression e) where
     renderPairSeq :: (PairSeqLike t c, PrettyPrintable c) => PairSeq t c -> (PDoc -> PDoc -> PDoc) -> (PDoc -> PDoc -> PDoc) -> PDoc
     renderPairSeq seq' renderPair combineTerms = if Map.null $ _psTerms seq'
       then renderRational $ _psOverall seq'
-      else foldl1 combineTerms renderedTerms
+      else foldl' combineTerms (head renderedTerms) (tail renderedTerms)
       where
       base = if hasNullOverall seq'
         then []
