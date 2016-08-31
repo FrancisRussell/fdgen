@@ -70,8 +70,15 @@ extractMultiplier (Sum seq') = case _psRewriteState seq' of
        normalised = normalise seq'
        overall = _psOverall normalised
        terms = _psTerms normalised
-       gcd' r1 r2 = (gcd (numerator r1) (numerator r2)) % (gcd (denominator r1) (denominator r2))
-       common = foldl' gcd' 1 (overall:(Map.elems terms))
+       gcd' r1 r2 = case (r1, r2) of
+         (0, 0) -> 1
+         (_, 0) -> abs r1
+         (0, _) -> abs r2
+         (_, _) -> (gcd (numerator r1) (numerator r2)) % (gcd (denominator r1) (denominator r2))
+       coeffs = overall:(Map.elems terms)
+       moreNegative = (length $ filter ( < 0) coeffs) > div (length coeffs) 2
+       sign = if moreNegative then (-1) else 1
+       common = sign * foldl' gcd' 0 coeffs
        overall' = (_psOverall normalised) / common
        terms' = Map.map (/ common) $ _psTerms normalised
        updated :: PairSeq SumTag e
