@@ -163,6 +163,17 @@ divide a b = Sum $ foldl (flip $ uncurry addTerm) empty [(a, 1), (b, -1)]
 hasNullOverall :: forall t e . PairSeqLike t e => PairSeq t e -> Bool
 hasNullOverall seq' = (_psOverall seq') == (_psOverall (empty :: PairSeq t e))
 
+simplifyPairSeq :: (PairSeqLike t e, Ord e) => PairSeq t e -> Expression e
+simplifyPairSeq seq' = newExpr
+  where
+  normalised = normalise seq'
+  newExpr = case Map.toList (_psTerms normalised) of
+    [] -> ConstantRational $ _psOverall normalised
+    [(a, 1)] -> if (hasNullOverall normalised)
+      then a
+      else wrap normalised
+    _ -> wrap normalised
+
 simplify :: Ord e => Expression e -> Expression e
 simplify (Product seq') = simplifyPairSeq seq'
 simplify (Sum seq') = simplifyPairSeq seq'
@@ -177,16 +188,27 @@ simplify' (Signum (ConstantRational r)) = ConstantRational $ signum r
 simplify' (Signum (ConstantFloat f)) = ConstantFloat $ signum f
 simplify' e = e
 
-simplifyPairSeq :: (PairSeqLike t e, Ord e) => PairSeq t e -> Expression e
-simplifyPairSeq seq' = newExpr
+rewrite :: Ord e => (Expression e -> Expression e) -> Expression e -> Expression e
+rewrite f e = simplify' . f $ rewrite' f e
+
+rewritePairSeq :: (Ord e, PairSeqLike t e) => (Expression e -> Expression e) -> PairSeq t e -> PairSeq t e
+rewritePairSeq f seq' = foldl' addTerm' empty $ asPairs seq'
   where
-  normalised = normalise seq'
-  newExpr = case Map.toList (_psTerms normalised) of
-    [] -> ConstantRational $ _psOverall normalised
-    [(a, 1)] -> if (hasNullOverall normalised)
-      then a
-      else wrap normalised
-    _ -> wrap normalised
+  addTerm' s (e, r) = addTerm (rewrite f e) r s
+
+rewrite' :: Ord e => (Expression e -> Expression e) -> Expression e -> Expression e
+rewrite' f (Sum seq') = simplifyPairSeq $ rewritePairSeq f seq'
+rewrite' f (Product seq') = simplifyPairSeq $ rewritePairSeq f seq'
+rewrite' f (Abs e) = Abs . simplify' $ rewrite f e
+rewrite' f (Signum e) = Signum . simplify' $ rewrite f e
+rewrite' _ e@(Symbol _) = e
+rewrite' _ e@(ConstantFloat _) = e
+rewrite' _ e@(ConstantRational _) = e
+
+subst :: Ord e => Expression e -> Expression e -> Expression e -> Expression e
+subst from to e = simplify $ rewrite update e
+  where
+  update e' = if e' == from then to else e'
 
 instance Ord e => Num (Expression e) where
   fromInteger = ConstantRational . fromInteger
