@@ -1,5 +1,5 @@
 {-# LANGUAGE TemplateHaskell, EmptyDataDecls, FlexibleInstances, MultiParamTypeClasses, ScopedTypeVariables #-}
-module FDGEN.Algebra (Expression(..), subst) where
+module FDGEN.Algebra (Expression(..), subst, lagrange) where
 import Data.Map.Strict (Map)
 import Data.Ratio ((%), denominator, numerator)
 import Data.Foldable (foldl')
@@ -217,6 +217,18 @@ subst :: Ord e => Expression e -> Expression e -> Expression e -> Expression e
 subst from to e = simplify $ rewrite update e
   where
   update e' = if e' == from then to else e'
+
+lagrange :: Ord e => Expression e -> [(Expression e, Expression e)] -> Expression e
+lagrange sym points  = foldl' (+) 0 bases
+  where
+  bases = [constructBasis j | j <- [0 .. (length points - 1)]]
+  constructBasis j = foldl' (*) yj $ map term pointIndices
+    where
+      (xj, yj) = points !! j
+      pointIndices = filter (/=j) [0 .. (length points - 1)]
+      term k = (sym - xk) / (xj - xk)
+        where
+          (xk, _) = points !! k
 
 instance Ord e => Num (Expression e) where
   fromInteger = ConstantRational . fromInteger
