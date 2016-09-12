@@ -1,5 +1,5 @@
 {-# LANGUAGE TemplateHaskell, EmptyDataDecls, FlexibleInstances, MultiParamTypeClasses, ScopedTypeVariables #-}
-module FDGEN.Algebra (Expression(..)) where
+module FDGEN.Algebra (Expression(..), subst) where
 import Data.Map.Strict (Map)
 import Data.Ratio ((%), denominator, numerator)
 import Data.Foldable (foldl')
@@ -166,7 +166,7 @@ mul :: Ord e => Expression e -> Expression e -> Expression e
 mul a b = Product $ foldl' (flip $ uncurry addTerm) empty [(a, 1), (b, 1)]
 
 divide :: Ord e => Expression e -> Expression e -> Expression e
-divide a b = Sum $ foldl' (flip $ uncurry addTerm) empty [(a, 1), (b, -1)]
+divide a b = Product $ foldl' (flip $ uncurry addTerm) empty [(a, 1), (b, -1)]
 
 hasNullOverall :: forall t e . PairSeqLike t e => PairSeq t e -> Bool
 hasNullOverall seq' = (_psOverall seq') == (_psOverall (empty :: PairSeq t e))
