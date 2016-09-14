@@ -292,11 +292,9 @@ integrate :: Ord e => e -> Expression e -> Expression e
 integrate sym = simplify . integrate' sym
 
 integrate' :: Ord e => e -> Expression e -> Expression e
-integrate' sym expr@(Abs _) = trivialIntegrate "abs" sym expr
-integrate' sym expr@(Signum _) = trivialIntegrate "sgn" sym expr
-integrate' sym expr@(Ln x) = if x == Symbol sym
-  then x * Ln x - x
-  else trivialIntegrate "ln" sym expr
+integrate' sym expr@(Abs _) = integrateByParts sym expr 1
+integrate' sym expr@(Signum _) = integrateByParts sym expr 1
+integrate' sym expr@(Ln _) = integrateByParts sym expr 1
 integrate' sym c@(ConstantFloat _) = Symbol sym * c
 integrate' sym c@(ConstantRational _) = Symbol sym * c
 integrate' sym (Symbol s) = if s == sym
@@ -304,15 +302,15 @@ integrate' sym (Symbol s) = if s == sym
   else (Symbol s) * (Symbol sym)
 integrate' sym (Sum seq') = Sum $ fromPairs integratedPairs
   where
-  integratedPairs = map (\(a, b) -> (integrate' sym a, b)) $ toPairs seq'
+  integratedPairs = map (\(a, b) -> (integrate sym a, b)) $ toPairs seq'
 integrate' sym (Product seq') = integratedDep * (Product $ fromPairs indep)
   where
   (dep, indep) = splitPairSeqDepends (Set.singleton sym) seq'
-  integratedDep = integrateProduct sym dep
+  integratedDep = integrateProductSeq sym dep
 
-integrateProduct :: Ord e => e -> [(Expression e, Rational)] -> Expression e
-integrateProduct sym [] = Symbol sym
-integrateProduct sym [(expr, exp')] = if exp' == 0
+integrateProductSeq :: Ord e => e -> [(Expression e, Rational)] -> Expression e
+integrateProductSeq sym [] = Symbol sym
+integrateProductSeq sym [(expr, exp')] = if exp' == 0
   then Symbol sym
   else if expr == Symbol sym
   then if exp' /= -1
@@ -321,33 +319,35 @@ integrateProduct sym [(expr, exp')] = if exp' == 0
   else if exp' == 1
   then integrate sym expr
   else if exp' > 1 && denominator exp' == 1
-  then integrateProduct sym [(expr, exp1 % 1), (expr, exp2 % 1)]
+  then integrateProductSeq sym [(expr, exp1 % 1), (expr, exp2 % 1)]
   else error "Cannot integrate negative or fractional exponents of complex expression"
     where
     iexp = numerator exp'
     exp1 = iexp `div` 2
     exp2 = iexp - exp1
-integrateProduct sym [(expr1, 1), (expr2, 1)] = tabularIntegrate sym expr1 expr2
-integrateProduct sym pairs = tabularIntegrate sym prod1 prod2
+integrateProductSeq sym [(expr1, 1), (expr2, 1)] = integrateByParts sym expr1 expr2
+integrateProductSeq sym pairs = integrateByParts sym prod1 prod2
   where
   (pairs1, pairs2) = splitAt (length pairs `div` 2) pairs
   prod1 = Product $ fromPairs pairs1
   prod2 = Product $ fromPairs pairs2
 
-tabularIntegrate :: Ord e => e -> Expression e -> Expression e -> Expression e
-tabularIntegrate sym toDiff toInt = tabularIntegrate' toDiff toInt 1
+integrateByParts :: Ord e => e -> Expression e -> Expression e -> Expression e
+integrateByParts sym toDiff toInt =
+  if (u == 0)
+  then 0
+  else u * iv + remainder
   where
-  tabularIntegrate' u v sign = if (u == 0)
-    then 0
-    else u * iv * sign + remainder
-    where
-    iv = integrate sym v
-    remainder = tabularIntegrate' (diff sym u) iv (-sign)
+  u = toDiff
+  v = toInt
+  iv = integrate sym v
+  du = diff sym u
+  remainder = integrate sym $ du*iv*(-1)
 
-trivialIntegrate :: Ord e => String -> e -> Expression e -> Expression e
-trivialIntegrate op sym expr = if depends (Set.singleton sym) expr
-  then error $ "Do not know how to integrate " ++ op
-  else Symbol sym * expr
+--trivialIntegrate :: Ord e => String -> e -> Expression e -> Expression e
+--trivialIntegrate op sym expr = if depends (Set.singleton sym) expr
+--  then error $ "Do not know how to integrate " ++ op
+--  else Symbol sym * expr
 
 instance Ord e => Num (Expression e) where
   fromInteger = ConstantRational . fromInteger
