@@ -81,7 +81,7 @@ extractMultiplier (Sum seq') = case _psRewriteState seq' of
        coeffs = overall:(Map.elems terms)
        moreNegative = (length $ filter ( < 0) coeffs) > div (length coeffs) 2
        sign = if moreNegative then (-1) else 1
-       common = sign * foldl' gcd' 0 coeffs
+       common = sign * foldl' gcd' (head coeffs) (tail coeffs)
        overall' = (_psOverall normalised) / common
        terms' = Map.map (/ common) $ _psTerms normalised
        updated :: PairSeq SumTag e
