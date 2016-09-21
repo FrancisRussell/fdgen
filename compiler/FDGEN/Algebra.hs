@@ -1,5 +1,5 @@
 {-# LANGUAGE TemplateHaskell, EmptyDataDecls, FlexibleInstances, MultiParamTypeClasses, ScopedTypeVariables #-}
-module FDGEN.Algebra (Expression(..), subst, lagrange, diff, integrate) where
+module FDGEN.Algebra (Expression(..), subst, lagrange, diff, integrate, expand) where
 import Data.Map.Strict (Map)
 import Data.Set (Set)
 import Data.Ratio ((%), denominator, numerator)
@@ -288,6 +288,13 @@ splitPairSeqDepends syms seq' = foldl' combine ([], []) $ toPairs seq'
       where
       addTerm' terms = (expr, coeff):terms
 
+definiteIntegrate :: (Ord e, Num n) => e -> Expression e -> Expression e -> Expression e -> Expression e
+definiteIntegrate sym low high expr = expand $ highInt - lowInt
+  where
+  integrated = integrate sym expr
+  lowInt = subst (Symbol sym) low integrated
+  highInt = subst (Symbol sym) high integrated
+
 integrate :: Ord e => e -> Expression e -> Expression e
 integrate sym = simplify . integrate' sym
 
@@ -348,6 +355,47 @@ integrateByParts sym toDiff toInt =
 --trivialIntegrate op sym expr = if depends (Set.singleton sym) expr
 --  then error $ "Do not know how to integrate " ++ op
 --  else Symbol sym * expr
+
+expand :: Ord e => Expression e -> Expression e
+expand = simplify . rewrite expand'
+
+expand' :: forall e . Ord e => Expression e -> Expression e
+expand' (Product seq') = constructExpandedProduct $ toPairs seq'
+expand' x = x
+
+multiplyExpand :: Ord e => Expression e -> Expression e -> Expression e
+multiplyExpand (Sum seq') expr = Sum . fromPairs $ map (\(a,b) -> (multiplyExpand a expr, b)) $ toPairs seq'
+multiplyExpand expr sum@(Sum _) = multiplyExpand sum expr
+multiplyExpand (Product seq') (Product seq'') = constructExpandedProduct $ concatMap toPairs [seq', seq'']
+multiplyExpand (Product seq') expr = constructExpandedProduct $ (expr, 1):(toPairs seq')
+multiplyExpand expr product@(Product _) = multiplyExpand product expr
+multiplyExpand a b = a * b
+
+constructExpandedProduct :: forall e . Ord e => [(Expression e, Rational)] -> Expression e
+constructExpandedProduct seq' = Product $ fromPairs [(fst q', 1), (snd q', -1)]
+  where
+  q = (1, 1) :: (Expression e, Expression e)
+  q' = foldl' mulTerm q seq'
+  mulTerm (qn, qd) (expr, exp') = if numerator exp' >= 0
+    then (multiplyExpand qn raised, qd)
+    else (qn, multiplyExpand qd raised)
+    where
+    absExp = abs exp'
+    raised = if denominator exp' /= 1
+      then raise expr absExp
+      else raiseWithOp multiplyExpand expr (numerator absExp)
+
+raiseWithOp :: Num e => (e -> e -> e) -> e -> Integer -> e
+raiseWithOp _ _ 0 = 1
+raiseWithOp _ expr 1 = expr
+raiseWithOp op expr n = if n < 0
+  then error "Cannot raise sum to negative exponent"
+  else if n `mod` 2 == 0
+  then even'
+  else even' `op` expr
+    where
+    half = raiseWithOp op expr $ n `div` 2
+    even' = half `op` half
 
 instance Ord e => Num (Expression e) where
   fromInteger = ConstantRational . fromInteger
