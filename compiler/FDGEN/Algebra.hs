@@ -96,7 +96,7 @@ instance PairSeqLike SumTag e where
   }
   extractMultipliers seq' = Map.foldlWithKey addScaledTerm base (_psTerms seq')
     where
-    base = (empty :: PairSeq SumTag e) { _psOverall = _psOverall seq' }
+    base = Lens.set psOverall (_psOverall seq') (empty :: PairSeq SumTag e)
     addScaledTerm :: PairSeq SumTag e -> Expression e -> Rational -> PairSeq SumTag e
     addScaledTerm ps expr coeff = addTerm expr' (coeff * multiplier) ps
       where
@@ -117,9 +117,12 @@ instance PairSeqLike ProdTag e where
     _psTerms = Map.empty,
     _psRewriteState = NonNormal
   }
-  extractMultipliers seq' = Map.foldlWithKey addScaledTerm base (_psTerms seq')
+  extractMultipliers seq' = if _psOverall rebuilt == 0
+    then Lens.set psOverall 0 (empty :: PairSeq ProdTag e)
+    else rebuilt
     where
-    base = (empty :: PairSeq ProdTag e) { _psOverall = _psOverall seq' }
+    rebuilt = Map.foldlWithKey addScaledTerm base (_psTerms seq')
+    base = Lens.set psOverall (_psOverall seq') (empty :: PairSeq ProdTag e)
     addScaledTerm :: PairSeq ProdTag e -> Expression e -> Rational -> PairSeq ProdTag e
     addScaledTerm ps expr coeff = newSeq
       where
