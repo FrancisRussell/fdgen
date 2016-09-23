@@ -366,39 +366,45 @@ expand' :: forall e . Ord e => Expression e -> Expression e
 expand' (Product seq') = constructExpandedProduct $ toPairs seq'
 expand' x = x
 
-multiplyExpand :: Ord e => Expression e -> Expression e -> Expression e
-multiplyExpand (Sum seq') expr = Sum . fromPairs $ map (\(a,b) -> (multiplyExpand a expr, b)) $ toPairs seq'
-multiplyExpand expr sum@(Sum _) = multiplyExpand sum expr
-multiplyExpand (Product seq') (Product seq'') = constructExpandedProduct $ concatMap toPairs [seq', seq'']
-multiplyExpand (Product seq') expr = constructExpandedProduct $ (expr, 1):(toPairs seq')
-multiplyExpand expr product@(Product _) = multiplyExpand product expr
-multiplyExpand a b = a * b
-
-constructExpandedProduct :: forall e . Ord e => [(Expression e, Rational)] -> Expression e
-constructExpandedProduct seq' = Product $ fromPairs [(fst q', 1), (snd q', -1)]
+mulSum :: Ord e => PairSeq SumTag e -> Expression e -> PairSeq SumTag e
+mulSum seq' (Sum seq'') = fromPairs result
   where
-  q = (1, 1) :: (Expression e, Expression e)
+  result = do
+    (e1, c1) <- toPairs seq'
+    (e2, c2) <- toPairs seq''
+    return (e1 * e2, c1 * c2)
+mulSum seq' expr = fromPairs . map (\(a,b) -> (a * expr, b)) $ toPairs seq'
+
+constructExpandedProduct :: forall e . Ord e => [(Expression e, Rational)] ->
+                            Expression e
+constructExpandedProduct seq' = Sum $ mulSum numeratorTerm denominatorTerm
+  where
+  unitSum = (fromPairs [(1,1)] :: PairSeq SumTag e)
+  q = (unitSum, unitSum)
   q' = foldl' mulTerm q seq'
+  numeratorTerm = fst q'
+  denominatorTerm = Product $ fromPairs [(Sum $ snd q', -1)]
+  mulTerm :: (PairSeq SumTag e, PairSeq SumTag e) -> (Expression e, Rational) ->
+             (PairSeq SumTag e, PairSeq SumTag e)
   mulTerm (qn, qd) (expr, exp') = if numerator exp' >= 0
-    then (multiplyExpand qn raised, qd)
-    else (qn, multiplyExpand qd raised)
+    then (mulSum qn raised, qd)
+    else (qn, mulSum qd raised)
     where
     absExp = abs exp'
     raised = if denominator exp' /= 1
       then raise expr absExp
-      else raiseWithOp multiplyExpand expr (numerator absExp)
-
-raiseWithOp :: Num e => (e -> e -> e) -> e -> Integer -> e
-raiseWithOp _ _ 0 = 1
-raiseWithOp _ expr 1 = expr
-raiseWithOp op expr n = if n < 0
-  then error "Cannot raise sum to negative exponent"
-  else if n `mod` 2 == 0
-  then even'
-  else even' `op` expr
-    where
-    half = raiseWithOp op expr $ n `div` 2
-    even' = half `op` half
+      else raiseInt (numerator absExp)
+    raiseInt :: Integer -> Expression e
+    raiseInt 0 = 1
+    raiseInt 1 = expr
+    raiseInt n = if n < 0
+      then error "Cannot raise to negative exponent"
+      else constructExpandedProduct prodTerms
+      where
+        prodTerms = if n `mod` 2 == 0
+          then [(even', 1), (even', 1)]
+          else [(even', 1), (even', 1), (expr, 1)]
+        even' = constructExpandedProduct [(expr, fromInteger $ n `div` 2)]
 
 instance Ord e => Num (Expression e) where
   fromInteger = ConstantRational . fromInteger
