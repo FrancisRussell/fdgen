@@ -417,6 +417,16 @@ constructExpandedProduct seq' = Sum $ mulSum numeratorTerm denominatorTerm
           then [(even', 1), (even', 1)]
           else [(expr, fromInteger $ n - 1), (expr, 1)]
 
+adamsBashforth :: String -> Expression String -> [Expression String] -> Expression String
+adamsBashforth h y0 fs = y0 + definiteIntegrate "_x" (-hSym) 0 interpolatedDerivatives
+  where
+    hSym = Symbol h
+    var = Symbol "_x"
+    genPoints _ [] = []
+    genPoints hCoeff (d:ds) = (hCoeff * hSym, d):(genPoints (hCoeff-1) ds)
+    points = genPoints (-1) fs
+    interpolatedDerivatives = lagrange var points
+
 instance Ord e => Num (Expression e) where
   fromInteger = ConstantRational . fromInteger
   (+) a = simplify . add a
