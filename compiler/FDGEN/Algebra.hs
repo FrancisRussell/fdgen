@@ -361,8 +361,16 @@ integrateByParts sym toDiff toInt =
 
 
 -- Fails to expand: (a / b + c) * (1 / (h + i))
+-- This is due to multiplication of sums raised to negative powers.
+-- Using iterate is a hack and might cause infinite iteration if
+-- the expanded form is non-unique.
 expand :: Ord e => Expression e -> Expression e
-expand = simplify . rewrite expand'
+expand expr = fixed rewrites
+  where
+  pass = simplify . rewrite expand'
+  rewrites = iterate pass expr
+  fixed (x1:x2:xs) = if x1 == x2 then x1 else fixed (x2:xs)
+  fixed _ = error "fixed should be applied to infinite list"
 
 expand' :: forall e . Ord e => Expression e -> Expression e
 expand' (Product seq') = constructExpandedProduct $ toPairs seq'
