@@ -1,5 +1,6 @@
 {-# LANGUAGE TemplateHaskell, EmptyDataDecls, FlexibleInstances, MultiParamTypeClasses, ScopedTypeVariables #-}
-module FDGEN.Algebra (Expression(..), subst, lagrange, diff, integrate, expand) where
+module FDGEN.Algebra ( Expression(..), subst, lagrange, diff, integrate, expand
+                     , definiteIntegrate) where
 import Data.Map.Strict (Map)
 import Data.Set (Set)
 import Data.Ratio ((%), denominator, numerator)
@@ -291,7 +292,7 @@ splitPairSeqDepends syms seq' = foldl' combine ([], []) $ toPairs seq'
       where
       addTerm' terms = (expr, coeff):terms
 
-definiteIntegrate :: (Ord e, Num n) => e -> Expression e -> Expression e -> Expression e -> Expression e
+definiteIntegrate :: Ord e => e -> Expression e -> Expression e -> Expression e -> Expression e
 definiteIntegrate sym low high expr = expand $ highInt - lowInt
   where
   integrated = integrate sym expr
@@ -299,7 +300,7 @@ definiteIntegrate sym low high expr = expand $ highInt - lowInt
   highInt = subst (Symbol sym) high integrated
 
 integrate :: Ord e => e -> Expression e -> Expression e
-integrate sym = simplify . integrate' sym
+integrate sym = simplify . integrate' sym . expand
 
 integrate' :: Ord e => e -> Expression e -> Expression e
 integrate' sym expr@(Abs _) = integrateByParts sym expr 1
