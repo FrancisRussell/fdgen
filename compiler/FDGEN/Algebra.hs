@@ -359,6 +359,8 @@ integrateByParts sym toDiff toInt =
 --  then error $ "Do not know how to integrate " ++ op
 --  else Symbol sym * expr
 
+
+-- Fails to expand: (a / b + c) * (1 / (h + i))
 expand :: Ord e => Expression e -> Expression e
 expand = simplify . rewrite expand'
 
@@ -401,10 +403,10 @@ constructExpandedProduct seq' = Sum $ mulSum numeratorTerm denominatorTerm
       then error "Cannot raise to negative exponent"
       else constructExpandedProduct prodTerms
       where
+        even' = constructExpandedProduct [(expr, fromInteger $ n `div` 2)]
         prodTerms = if n `mod` 2 == 0
           then [(even', 1), (even', 1)]
-          else [(even', 1), (even', 1), (expr, 1)]
-        even' = constructExpandedProduct [(expr, fromInteger $ n `div` 2)]
+          else [(expr, fromInteger $ n - 1), (expr, 1)]
 
 instance Ord e => Num (Expression e) where
   fromInteger = ConstantRational . fromInteger
