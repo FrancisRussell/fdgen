@@ -232,6 +232,19 @@ subst from to e = simplify $ rewrite update e
   where
   update e' = if e' == from then to else e'
 
+substSymbols :: (Ord e, Ord f) => (e -> f) -> Expression e -> Expression f
+substSymbols f expr = case expr of
+  (Symbol s) -> Symbol $ f s
+  (ConstantFloat r) -> ConstantFloat r
+  (ConstantRational r) -> ConstantRational r
+  (Abs e) -> Abs $ substSymbols f e
+  (Ln e) -> Ln $ substSymbols f e
+  (Signum e) -> Signum $ substSymbols f e
+  (Sum seq') -> Sum $ fromPairs $ transformPair <$> toPairs seq'
+  (Product seq') -> Product $ fromPairs $ transformPair <$> toPairs seq'
+  where
+  transformPair (e, r) = (substSymbols f e, r)
+
 lagrange :: Ord e => Expression e -> [(Expression e, Expression e)] -> Expression e
 lagrange sym points  = foldl' (+) 0 bases
   where
