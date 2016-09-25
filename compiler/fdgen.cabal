@@ -9,8 +9,8 @@ Cabal-Version:       >=1.8.0.2
 Library
   Hs-Source-Dirs:    .
   GHC-Options:       -Wall -fno-warn-missing-signatures
-  Build-Depends:     base, parsec, containers, lens, pretty
-  Exposed-Modules:   FDGEN.Parser FDGEN.Algebra FDGEN.Pretty
+  Build-Depends:     base, parsec, containers, lens, pretty, split
+  Exposed-Modules:   FDGEN.Parser FDGEN.Algebra FDGEN.Pretty FDGEN.Tensor
 
 Executable fdgen
   Main-is:           Main.hs
