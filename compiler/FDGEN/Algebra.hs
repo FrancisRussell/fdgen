@@ -1,6 +1,6 @@
 {-# LANGUAGE TemplateHaskell, EmptyDataDecls, FlexibleInstances, MultiParamTypeClasses, ScopedTypeVariables #-}
 module FDGEN.Algebra ( Expression(..), subst, lagrange, diff, integrate, expand
-                     , definiteIntegrate) where
+                     , definiteIntegrate, adamsBashforth) where
 import Data.Map.Strict (Map)
 import Data.Set (Set)
 import Data.Ratio ((%), denominator, numerator)
@@ -430,15 +430,29 @@ constructExpandedProduct seq' = Sum $ mulSum numeratorTerm denominatorTerm
           then [(even', 1), (even', 1)]
           else [(expr, fromInteger $ n - 1), (expr, 1)]
 
-adamsBashforth :: String -> Expression String -> [Expression String] -> Expression String
-adamsBashforth h y0 fs = y0 + definiteIntegrate "_x" (-hSym) 0 interpolatedDerivatives
+
+data TempSymbol e
+  = Original e
+  | Temporary String
+  deriving (Eq, Ord, Show)
+
+toTempSymbol :: e -> TempSymbol e
+toTempSymbol s = Original s
+
+fromTempSymbol :: TempSymbol e -> e
+fromTempSymbol (Original s) = s
+fromTempSymbol (Temporary s) = error $ "fromTempSymbol: unexpected symbol " ++ s ++ " in expression"
+
+adamsBashforth :: Ord e => e -> Expression e -> [Expression e] -> Expression e
+adamsBashforth h y0 fs = y0 + substSymbols fromTempSymbol integrated
   where
-    hSym = Symbol h
-    var = Symbol "_x"
+    hSym = Symbol $ Original h
+    var = Temporary "x"
     genPoints _ [] = []
     genPoints hCoeff (d:ds) = (hCoeff * hSym, d):(genPoints (hCoeff-1) ds)
-    points = genPoints (-1) fs
-    interpolatedDerivatives = lagrange var points
+    points = genPoints (-1) $ substSymbols toTempSymbol <$> fs
+    interpolatedDerivatives = lagrange (Symbol var) points
+    integrated = definiteIntegrate var (-hSym) 0 interpolatedDerivatives
 
 instance Ord e => Num (Expression e) where
   fromInteger = ConstantRational . fromInteger
