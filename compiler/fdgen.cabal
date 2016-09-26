@@ -10,7 +10,7 @@ Library
   Hs-Source-Dirs:    .
   GHC-Options:       -Wall -fno-warn-missing-signatures
   Build-Depends:     base, parsec, containers, lens, pretty, split
-  Exposed-Modules:   FDGEN.Parser FDGEN.Algebra FDGEN.Pretty FDGEN.Tensor
+  Exposed-Modules:   FDGEN.Parser FDGEN.Algebra FDGEN.Pretty FDGEN.Tensor FDGEN.Discrete
 
 Executable fdgen
   Main-is:           Main.hs

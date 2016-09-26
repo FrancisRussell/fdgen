@@ -3,7 +3,7 @@ import System.Environment (getArgs)
 import System.IO (hPutStrLn, stderr)
 import System.Exit (exitFailure)
 import FDGEN.Parser (parseInput)
-import FDGEN.Algebra ()
+import FDGEN.Discrete (buildDiscreteForm)
 
 main :: IO()
 main = getArgs >>= processFile . getFileName
@@ -18,4 +18,5 @@ processFile filename = do
   let result = parseInput filename contents in
     case result of
       Left err -> hPutStrLn stderr (show err) >> exitFailure
-      Right spec -> putStrLn $ show spec
+      Right spec -> (putStrLn $ show spec) >>
+                    (putStrLn . show $ buildDiscreteForm spec)

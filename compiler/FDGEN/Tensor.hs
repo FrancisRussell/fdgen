@@ -1,7 +1,8 @@
 module FDGEN.Tensor ( Tensor, getElement, setElement, add, sub, inner
                     , outer, dot, pairwiseWithOp, innerWithOp
                     , outerWithOp, dotWithOp, constructTensor
-                    , generateTensor) where
+                    , generateTensor, TensorIndex) where
+import Control.Applicative ((<$>))
 import Data.Foldable (foldl')
 import Data.List.Split (chunksOf)
 import Data.List (transpose)
@@ -11,6 +12,8 @@ data Tensor e = Tensor
   , _tensorRank :: Integer
   , _tensorEntries :: [e]
   } deriving Show
+
+type TensorIndex = [Integer]
 
 numEntries :: Tensor e -> Integer
 numEntries t = (tensorDim t) ^ (tensorRank t)
@@ -41,14 +44,14 @@ instance Functor Tensor where
     , _tensorEntries = f <$> _tensorEntries t
     }
 
-generateTensor :: Integer -> Integer -> ([Integer] -> e) -> Tensor e
+generateTensor :: Integer -> Integer -> (TensorIndex -> e) -> Tensor e
 generateTensor dim rank gen = genEntry <$> indexTensor
   where
   genEntry = gen . unflattenIndex indexTensor
   indexTensor = constructTensor dim rank indices
   indices = [0 .. (dim ^ rank - 1)]
 
-unflattenIndex :: Tensor e -> Integer -> [Integer]
+unflattenIndex :: Tensor e -> Integer -> TensorIndex
 unflattenIndex t i = if i < 0 || i >= numEntries t
   then error "unflattenIndex: tensor index out of range"
   else index (tensorRank t) i
@@ -59,7 +62,7 @@ unflattenIndex t i = if i < 0 || i >= numEntries t
       else []
       where divisor = dim ^ (rank - 1)
 
-flattenIndex :: Tensor e -> [Integer] -> Integer
+flattenIndex :: Tensor e -> TensorIndex -> Integer
 flattenIndex t entries = if (toInteger $ length entries) /= tensorRank t
   then error "flattenIndex: wrong number of entries in index"
   else if (length $ filter (\x -> x < 0 || x >= tensorDim t) entries) /= 0
@@ -69,7 +72,7 @@ flattenIndex t entries = if (toInteger $ length entries) /= tensorRank t
     index rank (r:remainder) = r * (tensorDim t) ^ (rank - 1) + index (rank - 1) remainder
     index _ [] = 0
 
-setElement :: Tensor e -> [Integer] -> e -> Tensor e
+setElement :: Tensor e -> TensorIndex -> e -> Tensor e
 setElement t idx value = t { _tensorEntries = updatedEntries }
   where
   updatedEntries = set (_tensorEntries t) (flattenIndex t idx) value
@@ -77,7 +80,7 @@ setElement t idx value = t { _tensorEntries = updatedEntries }
     where
     (first, _:second) = splitAt (fromInteger index) lst
 
-getElement :: Tensor e -> [Integer] -> e
+getElement :: Tensor e -> TensorIndex -> e
 getElement t idx = (_tensorEntries t) !! (fromInteger $ flattenIndex t idx)
 
 sameSize :: Tensor a -> Tensor b -> Bool

@@ -1,5 +1,7 @@
 {-# LANGUAGE TemplateHaskell, Rank2Types, FlexibleInstances #-}
-module FDGEN.Parser (parseInput) where
+module FDGEN.Parser ( parseInput, FDFL, getSymbols, Definition(..)
+                    , Mesh(..), stringLiteralValue, identifierValue
+                    , getSymbol, Field(..)) where
 import Data.Map (Map)
 import Data.Maybe (isJust)
 import Control.Applicative ((<$>))
@@ -20,6 +22,12 @@ data Identifier = Identifier String
 
 data StringLiteral = StringLiteral String
   deriving (Show, Ord, Eq)
+
+stringLiteralValue :: StringLiteral -> String
+stringLiteralValue (StringLiteral v) = v
+
+identifierValue :: Identifier -> String
+identifierValue (Identifier v) = v
 
 data Mesh = Mesh {
   _meshName :: StringLiteral,
@@ -106,6 +114,9 @@ emptyFDFL :: FDFL
 emptyFDFL = FDFL {
   symbols = Map.empty
 }
+
+getSymbols :: FDFL -> Map String Definition
+getSymbols = symbols
 
 emptyFDFLParseState :: FDFLParseState
 emptyFDFLParseState = FDFLParseState {
