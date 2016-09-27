@@ -2,7 +2,8 @@
 module FDGEN.Parser ( parseInput, FDFL, getSymbols, Definition(..)
                     , Mesh(..), stringLiteralValue, identifierValue
                     , getSymbol, Field(..), Solve(..), Equation(..)
-                    , FieldExpr(..), getFieldDef
+                    , FieldExpr(..), getFieldDef, LiteralConstant(..)
+                    , Constant(..)
                     ) where
 import Data.Map (Map)
 import Data.Maybe (isJust)

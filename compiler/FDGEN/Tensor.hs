@@ -1,7 +1,7 @@
 module FDGEN.Tensor ( Tensor, getElement, setElement, add, sub, inner
                     , outer, dot, pairwiseWithOp, innerWithOp
                     , outerWithOp, dotWithOp, constructTensor
-                    , generateTensor, TensorIndex) where
+                    , generateTensor, TensorIndex, divide) where
 import Control.Applicative ((<$>))
 import Data.Foldable (foldl')
 import Data.List.Split (chunksOf)
@@ -101,6 +101,14 @@ add = pairwiseWithOp (+)
 sub :: Num a => Tensor a -> Tensor a -> Tensor a
 sub = pairwiseWithOp (-)
 
+divide :: Fractional a => Tensor a -> Tensor a -> Tensor a
+divide a b = if tensorDim a /= tensorDim b
+  then error "div: operarands must have same dimension"
+  else if tensorRank b /= 0
+    then error "div: RHS must be scalar-valued tensor"
+    else (/ bValue) <$> a
+      where [bValue] = _tensorEntries b
+
 outerWithOp :: (a -> b -> c) -> Tensor a -> Tensor b -> Tensor c
 outerWithOp op a b = if tensorDim a /= tensorDim b
   then error "outerWithOp: operands must have same dimension"
@@ -113,14 +121,15 @@ outerWithOp op a b = if tensorDim a /= tensorDim b
 outer :: Num a => Tensor a -> Tensor a -> Tensor a
 outer = outerWithOp (*)
 
-innerWithOp :: (a -> b -> c) -> (c -> c -> c) -> Tensor a -> Tensor b -> c
+innerWithOp :: (a -> b -> c) -> (c -> c -> c) -> Tensor a -> Tensor b -> Tensor c
 innerWithOp mul combine a b = if not $ sameSize a b
   then error "innerWithOp: both operands must be same size"
-  else foldl' combine (head toSum) (tail toSum)
+  else constructTensor (tensorDim a) 0 [sum]
     where
     toSum = zipWith mul (_tensorEntries a) (_tensorEntries b)
+    sum = foldl' combine (head toSum) (tail toSum)
 
-inner :: Num a => Tensor a -> Tensor a -> a
+inner :: Num a => Tensor a -> Tensor a -> Tensor a
 inner = innerWithOp (*) (+)
 
 dotWithOp :: (a -> b -> c) -> (c -> c -> c) -> Tensor a -> Tensor b -> Tensor c
