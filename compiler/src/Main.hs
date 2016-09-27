@@ -19,4 +19,5 @@ processFile filename = do
     case result of
       Left err -> hPutStrLn stderr (show err) >> exitFailure
       Right spec -> (putStrLn $ show spec) >>
+                    putStrLn "" >>
                     (putStrLn . show $ buildDiscreteForm spec)

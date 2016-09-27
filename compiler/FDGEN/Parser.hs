@@ -1,7 +1,9 @@
 {-# LANGUAGE TemplateHaskell, Rank2Types, FlexibleInstances #-}
 module FDGEN.Parser ( parseInput, FDFL, getSymbols, Definition(..)
                     , Mesh(..), stringLiteralValue, identifierValue
-                    , getSymbol, Field(..)) where
+                    , getSymbol, Field(..), Solve(..), Equation(..)
+                    , FieldExpr(..), getFieldDef
+                    ) where
 import Data.Map (Map)
 import Data.Maybe (isJust)
 import Control.Applicative ((<$>))
@@ -165,14 +167,14 @@ noDuplicates entries = do
    (firstDuplicate:_) -> parserFail $ "Unexpected duplicate entry: " ++ show firstDuplicate
 
 validateDefinition :: (Definition -> Bool) -> String -> Validator Identifier
-validateDefinition validate friendlyType (Identifier name) = do
+validateDefinition validate friendlyType name = do
   state <- getState
   let fdfl = _psFDFL state
   case getSymbol fdfl name of
-    Nothing -> parserFail $ "Unknown identifier " ++ name
+    Nothing -> parserFail $ "Unknown identifier " ++ identifierValue name
     Just def -> if validate def
-      then return $ Identifier name
-      else parserFail $ name ++ "should be of type " ++ friendlyType ++ " but is not."
+      then return $ name
+      else parserFail $ identifierValue name ++ "should be of type " ++ friendlyType ++ " but is not."
 
 knownIdentifier :: Validator Identifier
 knownIdentifier = validateDefinition (const True) "any"
@@ -407,16 +409,21 @@ instance FDFLParsable LiteralConstant where
       parseNullary name constructor =
         parseReserved name >> const constructor <$> parseParens spaces
 
-containsSymbol :: FDFL -> String -> Bool
+containsSymbol :: FDFL -> Identifier -> Bool
 containsSymbol fdfl = isJust . getSymbol fdfl
 
-getSymbol :: FDFL -> String -> Maybe Definition
-getSymbol fdfl sym = Map.lookup sym (symbols fdfl)
+getSymbol :: FDFL -> Identifier -> Maybe Definition
+getSymbol fdfl (Identifier sym) = Map.lookup sym (symbols fdfl)
 
-addDefinition :: FDFL -> String -> Definition -> Either String FDFL
+getFieldDef :: FDFL -> Identifier -> Field
+getFieldDef fdfl ident = case getSymbol fdfl ident of
+  Just (FieldDef f) -> f
+  _ -> error $ "getFieldDef: unknown field " ++ identifierValue ident
+
+addDefinition :: FDFL -> Identifier -> Definition -> Either String FDFL
 addDefinition fdfl symName def = if containsSymbol fdfl symName
-  then Left $ "Attempt to redefine symbol " ++ symName
-  else Right fdfl { symbols = Map.insert symName def $ symbols fdfl}
+  then Left $ "Attempt to redefine symbol " ++ identifierValue symName
+  else Right fdfl { symbols = Map.insert (identifierValue symName) def $ symbols fdfl}
 
 fdflDef :: LanguageDef st
 fdflDef = emptyDef {
@@ -459,7 +466,7 @@ parseAssignment = do
   symbolName <- parseIdentifier
   _ <- parseReservedOp "="
   oldState <- getState
-  let addSymbol = addDefinition (_psFDFL oldState) symbolName
+  let addSymbol = addDefinition (_psFDFL oldState) (Identifier symbolName)
   let setFDFL = flip (Lens.set psFDFL) oldState
   newState <- setFDFL <$> (parserFailEither $ addSymbol <$> parseDefinition)
   putState newState
