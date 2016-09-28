@@ -1,10 +1,11 @@
 module FDGEN.Discrete (buildDiscreteForm) where
-import FDGEN.Algebra (Expression(..), diff)
+import FDGEN.Algebra (Expression(..), diff, adamsBashforth)
 import FDGEN.Tensor (Tensor, TensorIndex)
 import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, vListDoc)
 import Control.Applicative ((<$>))
 import Data.Maybe (catMaybes)
 import Data.List (genericIndex)
+import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified FDGEN.Parser as Parser
 import qualified FDGEN.Tensor as Tensor
@@ -28,6 +29,21 @@ instance PrettyPrintable Terminal
       indexDoc [] = PrettyPrint.empty
       indexDoc indices = toDoc $ show indices
 
+
+data TemporalTerminal
+  = PreviousValue
+  | DeltaT
+  | PreviousDerivative Integer
+  deriving (Eq, Ord, Show)
+
+instance PrettyPrintable TemporalTerminal
+  where
+  toDoc t = case t of
+    PreviousValue -> toDoc "y0"
+    DeltaT -> toDoc "h"
+    PreviousDerivative i -> PrettyPrint.hcat $ toDoc <$> ["f(n-", i', ")"]
+      where
+      i' = show i
 
 data FieldAccess = FieldAccess {
   _fieldAccessName :: String,
@@ -83,7 +99,8 @@ data Solve = Solve {
   _solveName :: String,
   _solveSpatialOrder :: Integer,
   _solveTemporalOrder :: Integer,
-  _solveUpdates :: [Update]
+  _solveUpdates :: [Update],
+  _solveTimeSteppingSchemes :: Map Integer (Expression TemporalTerminal)
 } deriving Show
 
 instance PrettyPrintable Solve
@@ -93,7 +110,12 @@ instance PrettyPrintable Solve
     , ("spatial_order", toDoc $ _solveSpatialOrder solve)
     , ("temporal_order", toDoc $ _solveTemporalOrder solve)
     , ("updates", vListDoc $ _solveUpdates solve)
+    , ("time_stepping_schemes", schemesDoc)
     ]
+    where
+    schemesDoc = structureDoc "Map" entries
+    entries = transformEntry <$> Map.assocs (_solveTimeSteppingSchemes solve)
+    transformEntry (order, expr) = (show order, toDoc expr)
 
 data FieldTemporalDerivative
   = FieldTemporalDerivative String Integer
@@ -150,13 +172,19 @@ buildSolve :: Parser.FDFL -> Parser.Mesh -> Parser.Solve -> Solve
 buildSolve fdfl mesh solve = Solve
  { _solveName = Parser.stringLiteralValue $ Parser._solveName solve
  , _solveSpatialOrder = Parser._solveSpatialOrder solve
- , _solveTemporalOrder = Parser._solveTemporalOrder solve
+ , _solveTemporalOrder = temporalOrder
  , _solveUpdates = (buildUpdate fdfl mesh . getExpressionDef) <$> (Parser._solveEquations solve)
+ , _solveTimeSteppingSchemes = Map.fromList [(n, buildAdamsBashForth n) | n <- [1..temporalOrder]]
  }
  where
+ temporalOrder = Parser._solveTemporalOrder solve
  getExpressionDef ident = case Parser.getSymbol fdfl ident of
    Just (Parser.EquationDef equ) -> equ
    _ -> error $ "buildSolve: unknown equation " ++ Parser.identifierValue ident
+
+buildAdamsBashForth :: Integer -> Expression TemporalTerminal
+buildAdamsBashForth order =
+  adamsBashforth DeltaT (Symbol PreviousValue) [Symbol $ PreviousDerivative i | i <- [0..order-1]]
 
 buildUpdate :: Parser.FDFL -> Parser.Mesh -> Parser.Equation -> Update
 buildUpdate fdfl mesh equ = Update
