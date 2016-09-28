@@ -25,6 +25,8 @@ data Expression e
   | Abs (Expression e)
   | Signum (Expression e)
   | Ln (Expression e)
+  | Diff (Expression e) e Integer
+  | Int (Expression e) e
   deriving (Show, Eq, Ord)
 
 data RewriteState
@@ -223,9 +225,16 @@ rewrite' f (Product seq') = simplifyPairSeq $ rewritePairSeq f seq'
 rewrite' f (Abs e) = Abs . simplify' $ rewrite f e
 rewrite' f (Signum e) = Signum . simplify' $ rewrite f e
 rewrite' f (Ln e) = Ln . simplify' $ rewrite f e
+rewrite' f (Diff e sym n) = Diff (simplify' $ rewrite f e) (rewriteSymbol f sym) n
+rewrite' f (Int e sym) = Int (simplify' $ rewrite f e) (rewriteSymbol f sym)
 rewrite' _ e@(Symbol _) = e
 rewrite' _ e@(ConstantFloat _) = e
 rewrite' _ e@(ConstantRational _) = e
+
+rewriteSymbol :: (Expression e -> Expression e) -> e -> e
+rewriteSymbol f sym = case f (Symbol sym) of
+  Symbol s -> s
+  _ -> error $ "rewriteSymbol: cannot subsitute variable with complex expression"
 
 subst :: Ord e => Expression e -> Expression e -> Expression e -> Expression e
 subst from to e = simplify $ rewrite update e
@@ -242,6 +251,8 @@ substSymbols f expr = case expr of
   (Signum e) -> Signum $ substSymbols f e
   (Sum seq') -> Sum $ fromPairs $ transformPair <$> toPairs seq'
   (Product seq') -> Product $ fromPairs $ transformPair <$> toPairs seq'
+  (Diff e sym i) -> Diff (substSymbols f e) (f sym) i
+  (Int e sym ) -> Int (substSymbols f e) (f sym)
   where
   transformPair (e, r) = (substSymbols f e, r)
 
@@ -268,6 +279,8 @@ depends _ (ConstantRational _) = False
 depends syms (Abs expr) = depends syms expr
 depends syms (Signum expr) = depends syms expr
 depends syms (Ln expr) = depends syms expr
+depends syms (Diff e sym _) = Set.member sym syms || depends syms e
+depends syms (Int e sym) = depends (Set.delete sym syms) e
 
 extractElem :: [a] -> Int -> (a, [a])
 extractElem lst index = (elem', rest)
@@ -295,6 +308,12 @@ diff' sym (Product seq') = Sum $ fromPairs subTerms
   constructSubTerm ((expr, power), rest) = (Product $ fromPairs newTerms, power)
     where
     newTerms = (diff sym expr, 1):(expr, power - 1):rest
+diff' sym expr@(Diff e s i) = if sym == s
+  then Diff e s (i+1)
+  else Diff expr sym 1
+diff' sym expr@(Int e s) = if sym == s
+  then e
+  else Diff expr sym 1
 
 splitPairSeqDepends :: (PairSeqLike t e, Ord e) => Set e -> PairSeq t e -> ([(Expression e, Rational)], [(Expression e, Rational)])
 splitPairSeqDepends syms seq' = foldl' combine ([], []) $ toPairs seq'
@@ -331,6 +350,8 @@ integrate' sym (Product seq') = integratedDep * (Product $ fromPairs indep)
   where
   (dep, indep) = splitPairSeqDepends (Set.singleton sym) seq'
   integratedDep = integrateProductSeq sym dep
+integrate' sym (Diff e s i) = Int (Diff e s i) sym
+integrate' sym expr@(Int _ _) = Int expr sym
 
 integrateProductSeq :: Ord e => e -> [(Expression e, Rational)] -> Expression e
 integrateProductSeq sym [] = Symbol sym
@@ -540,3 +561,5 @@ instance PrettyPrintable e => PrettyPrintable (Expression e) where
       Abs e -> renderFunction "abs" [toPDoc e]
       Signum e -> renderFunction "sgn" [toPDoc e]
       Ln e -> renderFunction "ln" [toPDoc e]
+      Diff e s i -> renderFunction "diff" [toPDoc e, renderTerminal s, renderTerminal i]
+      Int e s -> renderFunction "int" [toPDoc e, renderTerminal s]
