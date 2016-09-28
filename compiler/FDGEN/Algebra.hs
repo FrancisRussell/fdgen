@@ -575,6 +575,8 @@ instance PrettyPrintable e => PrettyPrintable (Expression e) where
       Abs e -> renderFunction "abs" [toPDoc e]
       Signum e -> renderFunction "sgn" [toPDoc e]
       Ln e -> renderFunction "ln" [toPDoc e]
-      Diff e s i -> renderFunction "diff" [toPDoc e, renderTerminal s, renderTerminal i]
+      Diff e s i -> renderFunction "diff" $ [toPDoc e, renderTerminal s] ++ if i == 1
+        then []
+        else [renderTerminal i]
       Int e s -> renderFunction "int" [toPDoc e, renderTerminal s]
       Function sym params -> renderFunction (prettyPrint sym) (toPDoc <$> params)
