@@ -1,18 +1,33 @@
 module FDGEN.Discrete (buildDiscreteForm) where
 import FDGEN.Algebra (Expression(..), diff)
 import FDGEN.Tensor (Tensor, TensorIndex)
+import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, vListDoc)
 import Control.Applicative ((<$>))
 import Data.Maybe (catMaybes)
+import Data.List (genericIndex)
 import qualified Data.Map.Strict as Map
 import qualified FDGEN.Parser as Parser
 import qualified FDGEN.Tensor as Tensor
+import qualified Text.PrettyPrint as PrettyPrint
 
 data Terminal
   = FieldRef String TensorIndex
-  | FieldSpatialDerivative String TensorIndex Integer
   | ConstantRef String TensorIndex
   | Direction Integer
   deriving (Eq, Ord, Show)
+
+instance PrettyPrintable Terminal
+  where
+  toDoc t = case t of
+    FieldRef name index -> fieldRef name index
+    Direction i -> toDoc $ genericIndex ["x", "y", "z"] i
+    ConstantRef name index -> fieldRef name index
+    where
+    fieldRef name index = PrettyPrint.hcat [toDoc name, indexDoc index]
+      where
+      indexDoc [] = PrettyPrint.empty
+      indexDoc indices = toDoc $ show indices
+
 
 data FieldAccess = FieldAccess {
   _fieldAccessName :: String,
@@ -20,12 +35,31 @@ data FieldAccess = FieldAccess {
   _fieldAccessSpatialOffsets :: [Integer]
 } deriving Show
 
+data Discretised = Discretised {
+  _discretisedMeshes :: [Mesh]
+} deriving Show
+
+instance PrettyPrintable Discretised
+  where
+  toDoc discrete = structureDoc "Discretised"
+    [ ("meshes", vListDoc $ _discretisedMeshes discrete)
+    ]
+
 data Mesh = Mesh {
   _meshName :: String,
   _meshDimension :: Integer,
   _meshFields :: [Field],
   _meshSolves :: [Solve]
 } deriving Show
+
+instance PrettyPrintable Mesh
+  where
+  toDoc mesh = structureDoc "Mesh"
+    [ ("name", toDoc $ _meshName mesh)
+    , ("dim", toDoc $ _meshDimension mesh)
+    , ("fields", vListDoc $ _meshFields mesh)
+    , ("solves", vListDoc $ _meshSolves mesh)
+    ]
 
 data Field = Field {
   _fieldName :: String,
@@ -35,6 +69,16 @@ data Field = Field {
   _fieldStaggerTemporal :: Bool
 } deriving Show
 
+instance PrettyPrintable Field
+  where
+  toDoc field = structureDoc "Field"
+    [ ("name", toDoc $ _fieldName field)
+    , ("rank", toDoc $ _fieldRank field)
+    , ("symmetric", toDoc $ _fieldSymmetric field)
+    , ("spatial_staggering", hListDoc $ _fieldStaggerSpatial field)
+    , ("temporal_staggering", toDoc $ _fieldStaggerTemporal field)
+    ]
+
 data Solve = Solve {
   _solveName :: String,
   _solveSpatialOrder :: Integer,
@@ -42,17 +86,39 @@ data Solve = Solve {
   _solveUpdates :: [Update]
 } deriving Show
 
+instance PrettyPrintable Solve
+  where
+  toDoc solve = structureDoc "Solve"
+    [ ("name", toDoc $ _solveName solve)
+    , ("spatial_order", toDoc $ _solveSpatialOrder solve)
+    , ("temporal_order", toDoc $ _solveTemporalOrder solve)
+    , ("updates", vListDoc $ _solveUpdates solve)
+    ]
+
 data FieldTemporalDerivative
   = FieldTemporalDerivative String Integer
   deriving (Eq, Ord, Show)
+
+instance PrettyPrintable FieldTemporalDerivative
+  where
+  toDoc (FieldTemporalDerivative f i) = PrettyPrint.hcat $ PrettyPrint.text <$> ["(d^", i', " * ", f, ")/dt^", i']
+    where
+    i' = show i
 
 data Update = Update
   { _updateLHS :: FieldTemporalDerivative
   , _updateRHS :: Tensor (Expression Terminal)
   } deriving Show
 
-buildDiscreteForm :: Parser.FDFL -> [Mesh]
-buildDiscreteForm fdfl = catMaybes maybeMeshes
+instance PrettyPrintable Update
+  where
+  toDoc update = structureDoc "Update"
+    [ ("lhs", toDoc $ _updateLHS update)
+    , ("rhs", toDoc $ _updateRHS update)
+    ]
+
+buildDiscreteForm :: Parser.FDFL -> Discretised
+buildDiscreteForm fdfl = Discretised { _discretisedMeshes = catMaybes maybeMeshes }
   where
   maybeMeshes = maybeBuildMesh <$> Map.elems (Parser.getSymbols fdfl)
   maybeBuildMesh (Parser.MeshDef meshDef) = Just $ buildMesh fdfl meshDef

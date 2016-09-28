@@ -5,13 +5,22 @@ module FDGEN.Tensor ( Tensor, getElement, setElement, add, sub, inner
 import Control.Applicative ((<$>))
 import Data.Foldable (foldl')
 import Data.List.Split (chunksOf)
-import Data.List (transpose)
+import Data.List (transpose, genericIndex, genericSplitAt)
+import FDGEN.Pretty (PrettyPrintable(..), structureDoc, vListDoc)
 
 data Tensor e = Tensor
   { _tensorDim :: Integer
   , _tensorRank :: Integer
   , _tensorEntries :: [e]
   } deriving Show
+
+instance PrettyPrintable e => PrettyPrintable (Tensor e)
+  where
+  toDoc tensor = structureDoc "Tensor"
+    [ ("rank", toDoc $ _tensorRank tensor)
+    , ("dimension", toDoc $ _tensorDim tensor)
+    , ("entries", vListDoc $ _tensorEntries tensor)
+    ]
 
 type TensorIndex = [Integer]
 
@@ -78,10 +87,10 @@ setElement t idx value = t { _tensorEntries = updatedEntries }
   updatedEntries = set (_tensorEntries t) (flattenIndex t idx) value
   set lst index v = first ++ (v:second)
     where
-    (first, _:second) = splitAt (fromInteger index) lst
+    (first, _:second) = genericSplitAt index lst
 
 getElement :: Tensor e -> TensorIndex -> e
-getElement t idx = (_tensorEntries t) !! (fromInteger $ flattenIndex t idx)
+getElement t idx = genericIndex (_tensorEntries t) (flattenIndex t idx)
 
 sameSize :: Tensor a -> Tensor b -> Bool
 sameSize a b = size a == size b
@@ -124,10 +133,10 @@ outer = outerWithOp (*)
 innerWithOp :: (a -> b -> c) -> (c -> c -> c) -> Tensor a -> Tensor b -> Tensor c
 innerWithOp mul combine a b = if not $ sameSize a b
   then error "innerWithOp: both operands must be same size"
-  else constructTensor (tensorDim a) 0 [sum]
+  else constructTensor (tensorDim a) 0 [summed]
     where
     toSum = zipWith mul (_tensorEntries a) (_tensorEntries b)
-    sum = foldl' combine (head toSum) (tail toSum)
+    summed = foldl' combine (head toSum) (tail toSum)
 
 inner :: Num a => Tensor a -> Tensor a -> Tensor a
 inner = innerWithOp (*) (+)

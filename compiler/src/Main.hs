@@ -21,4 +21,4 @@ processFile filename = do
       Left err -> hPutStrLn stderr (show err) >> exitFailure
       Right spec -> (putStrLn $ prettyPrint spec) >>
                     putStrLn "" >>
-                    (putStrLn . show $ buildDiscreteForm spec)
+                    (putStrLn . prettyPrint $ buildDiscreteForm spec)
