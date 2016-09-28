@@ -3,10 +3,11 @@ module FDGEN.Parser ( parseInput, FDFL, getSymbols, Definition(..)
                     , Mesh(..), stringLiteralValue, identifierValue
                     , getSymbol, Field(..), Solve(..), Equation(..)
                     , FieldExpr(..), getFieldDef, LiteralConstant(..)
-                    , Constant(..)
+                    , Constant(..), Identifier(..)
                     ) where
 import Data.Map (Map)
 import Data.Maybe (isJust)
+import Data.List (genericIndex)
 import Control.Applicative ((<$>))
 import Control.Monad ((>=>))
 import Text.Parsec.Char (letter, spaces)
@@ -16,15 +17,23 @@ import Text.Parsec (ParsecT, ParseError, runParser, getState, Parsec, putState)
 import Text.Parsec.Prim (many, parserFail)
 import Text.Parsec.Expr (buildExpressionParser, Operator(..), Assoc(..))
 import Text.Parsec.Token (GenTokenParser(..), GenLanguageDef(..), makeTokenParser)
+import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc)
 import qualified Control.Lens as Lens
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import qualified Text.PrettyPrint as PrettyPrint
 
 data Identifier = Identifier String
   deriving (Show, Ord, Eq)
 
+instance PrettyPrintable Identifier where
+  toDoc (Identifier i) = PrettyPrint.text i
+
 data StringLiteral = StringLiteral String
   deriving (Show, Ord, Eq)
+
+instance PrettyPrintable StringLiteral where
+  toDoc (StringLiteral s) = PrettyPrint.text $ show s
 
 stringLiteralValue :: StringLiteral -> String
 stringLiteralValue (StringLiteral v) = v
@@ -39,6 +48,15 @@ data Mesh = Mesh {
   _meshSolves :: [Identifier]
 } deriving Show
 
+instance PrettyPrintable Mesh
+  where
+  toDoc mesh = structureDoc "Mesh"
+    [ ("name", toDoc $ _meshName mesh)
+    , ("dim", toDoc $ _meshDimension mesh)
+    , ("fields", hListDoc $ _meshFields mesh)
+    , ("solves", hListDoc $ _meshSolves mesh)
+    ]
+
 data Field = Field {
   _fieldName :: StringLiteral,
   _fieldRank :: Integer,
@@ -46,6 +64,16 @@ data Field = Field {
   _fieldStaggerStrategySpatial :: StaggerStrategy,
   _fieldStaggerStrategyTemporal :: StaggerStrategy
 } deriving Show
+
+instance PrettyPrintable Field
+  where
+  toDoc field = structureDoc "Field"
+    [ ("name", toDoc $ _fieldName field)
+    , ("rank", toDoc $ _fieldRank field)
+    , ("symmetric", toDoc $ _fieldSymmetric field)
+    , ("spatial_stagger", toDoc $ _fieldStaggerStrategySpatial field)
+    , ("temporal_stagger", toDoc $ _fieldStaggerStrategyTemporal field)
+    ]
 
 data FieldExpr a
   = FieldRef a
@@ -61,6 +89,32 @@ data FieldExpr a
   | FieldTemporalDerivative (FieldExpr a)
   deriving Show
 
+instance PrettyPrintable a => PrettyPrintable (FieldExpr a)
+  where
+  toDoc expr = case expr of
+    FieldRef a -> toDoc a
+    FieldAddition a b -> binaryOp "+" a b
+    FieldDivision a b -> binaryOp "/" a b
+    FieldInner a b -> function "inner" [a, b]
+    FieldOuter a b -> function "outer" [a, b]
+    FieldDot a b -> function "dot" [a, b]
+    FieldGradient a -> function "grad" [a]
+    FieldDivergence a -> function "div" [a]
+    FieldSpatialDerivative a i -> function "diff" [toDoc a, dim i]
+    FieldTemporalDerivative a -> function "dt" [a]
+    FieldLiteral (ScalarConstant r) -> PrettyPrint.double r
+    FieldLiteral PermutationSymbol -> text "epsilon"
+    where
+      text = PrettyPrint.text
+      hcat = PrettyPrint.hcat
+      dim x = genericIndex (text <$> ["x", "y", "z"] ++ ["dim(" ++ show n ++ ")" | n <- [3..] :: [Integer]]) x
+      binaryOp op a b = hcat [text "(", toDoc a, text $ " " ++ op ++ " ", toDoc b, text ")"]
+      function name params = hcat [prefix, content, suffix]
+        where
+        prefix = text $ name ++ "("
+        suffix = text ")"
+        content = hcat $ PrettyPrint.punctuate (text ", ") (toDoc <$> params)
+
 data LiteralConstant
   = ScalarConstant Double
   | PermutationSymbol
@@ -71,10 +125,24 @@ data Constant = Constant {
   _constantName :: StringLiteral
 } deriving Show
 
+instance PrettyPrintable Constant
+ where
+ toDoc constant = structureDoc "Constant"
+   [ ("rank", toDoc $ _constantRank constant)
+   , ("name", toDoc $ _constantName constant)
+   ]
+
 data Equation = Equation {
   _fieldUpdateLHS :: FieldExpr Identifier,
   _fieldUpdateRHS :: FieldExpr Identifier
 } deriving Show
+
+instance PrettyPrintable Equation
+ where
+ toDoc equ = structureDoc "Equation"
+   [ ("lhs", toDoc $ _fieldUpdateLHS equ)
+   , ("rhs", toDoc $ _fieldUpdateRHS equ)
+   ]
 
 data Solve = Solve {
   _solveName :: StringLiteral,
@@ -82,6 +150,15 @@ data Solve = Solve {
   _solveTemporalOrder :: Integer,
   _solveEquations :: [Identifier]
 } deriving Show
+
+instance PrettyPrintable Solve
+ where
+ toDoc solve = structureDoc "Solve"
+   [ ("name", toDoc $ _solveName solve)
+   , ("spatial_order", toDoc $ _solveSpatialOrder solve)
+   , ("temporal_order", toDoc $ _solveTemporalOrder solve)
+   , ("equations", hListDoc $ _solveEquations solve)
+   ]
 
 data Definition
  = FieldDef Field
@@ -92,15 +169,35 @@ data Definition
  | SolveDef Solve
  deriving Show
 
+instance PrettyPrintable Definition
+ where
+ toDoc def = case def of
+   FieldDef f -> toDoc f
+   MeshDef m -> toDoc m
+   EquationDef e -> toDoc e
+   ConstantDef c -> toDoc c
+   FieldExprDef f -> toDoc  f
+   SolveDef s -> toDoc s
+
 data StaggerStrategy
   = All
   | None
   | Dimension
   deriving (Bounded, Enum, Show)
 
+instance PrettyPrintable StaggerStrategy where
+  toDoc = PrettyPrint.text . show
+
 data FDFL = FDFL {
   symbols :: Map String Definition
 } deriving Show
+
+instance PrettyPrintable FDFL
+  where
+  toDoc fdfl = structureDoc "FDFL" fields
+    where
+    fields = fieldDoc <$> (Map.assocs $ symbols fdfl)
+    fieldDoc (name, value) = (name, toDoc value)
 
 data FDFLParseState = FDFLParseState {
   _psFDFL :: FDFL

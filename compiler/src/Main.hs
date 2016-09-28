@@ -4,6 +4,7 @@ import System.IO (hPutStrLn, stderr)
 import System.Exit (exitFailure)
 import FDGEN.Parser (parseInput)
 import FDGEN.Discrete (buildDiscreteForm)
+import FDGEN.Pretty (prettyPrint)
 
 main :: IO()
 main = getArgs >>= processFile . getFileName
@@ -18,6 +19,6 @@ processFile filename = do
   let result = parseInput filename contents in
     case result of
       Left err -> hPutStrLn stderr (show err) >> exitFailure
-      Right spec -> (putStrLn $ show spec) >>
+      Right spec -> (putStrLn $ prettyPrint spec) >>
                     putStrLn "" >>
                     (putStrLn . show $ buildDiscreteForm spec)
