@@ -1,5 +1,5 @@
 module FDGEN.Discrete (buildDiscreteForm) where
-import FDGEN.Algebra (Expression(..))
+import FDGEN.Algebra (Expression(..), diff)
 import FDGEN.Tensor (Tensor, TensorIndex)
 import Control.Applicative ((<$>))
 import Data.Maybe (catMaybes)
@@ -11,6 +11,7 @@ data Terminal
   = FieldRef String TensorIndex
   | FieldSpatialDerivative String TensorIndex Integer
   | ConstantRef String TensorIndex
+  | Direction Integer
   deriving (Eq, Ord, Show)
 
 data FieldAccess = FieldAccess {
@@ -71,7 +72,7 @@ buildMesh fdfl mesh = Mesh
     _ -> error $ "buildMesh: unknown solve " ++ Parser.identifierValue ident
 
 buildField :: Parser.FDFL -> Parser.Mesh -> Parser.Field -> Field
-buildField fdfl _ field = Field
+buildField _ _ field = Field
   { _fieldName = Parser.stringLiteralValue $ Parser._fieldName field
   , _fieldRank = Parser._fieldRank field
   , _fieldSymmetric = Parser._fieldSymmetric field
@@ -103,6 +104,7 @@ buildUpdate fdfl mesh equ = Update
     (Parser.FieldTemporalDerivative (Parser.FieldRef ident)) ->
       FieldTemporalDerivative (getFieldName $ Parser.getFieldDef fdfl ident) 1
     _ -> error $ "Unsupported LHS: " ++ show expr
+  buildRHS :: Parser.FieldExpr Parser.Identifier -> Tensor (Expression Terminal)
   buildRHS expr = case expr of
     Parser.FieldTemporalDerivative _ -> error "buildUpdate: Temporal derivative not expected in RHS"
     Parser.FieldAddition l r -> Tensor.add (buildRHS l) (buildRHS r)
@@ -118,9 +120,13 @@ buildUpdate fdfl mesh equ = Update
       Parser.PermutationSymbol -> genLC dimension
     Parser.FieldRef ref -> case Parser.getSymbol fdfl ref of
       Just (Parser.ConstantDef constant) ->
-        buildAccessTensor (Parser._constantName constant) (Parser._constantRank constant) ConstantRef
+        buildAccessTensor (Parser._constantName constant) (Parser._constantRank constant) constructor
+          where
+          constructor name = Symbol . ConstantRef name
       Just (Parser.FieldDef field) ->
-        buildAccessTensor (Parser._fieldName field) (Parser._fieldRank field) FieldRef
+        buildAccessTensor (Parser._fieldName field) (Parser._fieldRank field) constructor
+          where
+          constructor name index = Function (FieldRef name index) directions
       Just (Parser.FieldExprDef def) -> buildRHS def
       Just _ -> error $ "buildUpdate: unable to treat symbol as field: " ++ Parser.identifierValue ref
       Nothing -> error $ "buildUpdate: unknown symbol " ++ Parser.identifierValue ref
@@ -131,8 +137,7 @@ buildUpdate fdfl mesh equ = Update
     genNabla [dim] = genDerivative dim
     genNabla _ = error "genNabla: called for wrong rank"
     genDerivative :: Integer -> Expression Terminal -> Expression Terminal
-    genDerivative dim (Symbol (FieldRef name index)) = Symbol $ FieldSpatialDerivative name index dim
-    genDerivative _ _ = error "genDerivative: can currently only handle fields directly" --TODO: generalise me
+    genDerivative dir = diff (Direction dir)
     genLC :: Integer -> Tensor (Expression Terminal)
     genLC dim = case dim of
       2 -> Tensor.constructTensor 2 2 [0, 1, -1, 0]
@@ -149,4 +154,5 @@ buildUpdate fdfl mesh equ = Update
       _ -> error $ "genLC: cannot generate Levi-Civita for dimension " ++ show dim
     buildAccessTensor name rank constructor = Tensor.generateTensor dimension rank gen
       where
-      gen idx = Symbol $ constructor (Parser.stringLiteralValue name) idx
+      gen idx = constructor (Parser.stringLiteralValue name) idx
+    directions = Symbol . Direction <$> [0 .. dimension -1]
