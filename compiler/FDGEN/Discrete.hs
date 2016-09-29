@@ -4,7 +4,7 @@ import FDGEN.Tensor (Tensor, TensorIndex)
 import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, vListDoc)
 import Control.Applicative ((<$>))
 import Data.Maybe (catMaybes)
-import Data.List (genericIndex)
+import Data.List (genericIndex, genericTake, permutations)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified FDGEN.Parser as Parser
@@ -60,15 +60,12 @@ instance PrettyPrintable SpatialTerminal
 computeInterpolation :: Integer -> [Bool] -> [Integer] -> Expression SpatialTerminal
 computeInterpolation order staggering derivatives =
   if length staggering /= length derivatives
-  then error $ "computeIterpolation: inconsistent dimension specification"
+  then error $ "computeInterpolation: inconsistent dimension specification"
   else doDerivatives 0 derivatives interpolated
     where
     interpolated = buildLagrange 0 stencilWidths []
     stencilWidths = stencilWidth <$> zip staggering derivatives
-    dimension = length derivatives
-    stencilWidth (stagger, derivative) = if stagger || derivative > 0
-      then max 1 $ order + derivative --TODO: check with mathematician
-      else 1
+    stencilWidth (stagger, derivative) = 1 + order + derivative
     buildLagrange _ [] _ = error "buildLangrange: must be called with at least 1 dimension"
     buildLagrange dim (width:ws) idx =
       lagrange variable [(pointPos n, pointValue n) | n <- [0 .. width-1]]
@@ -157,6 +154,20 @@ instance PrettyPrintable Solve
     entries = transformEntry <$> Map.assocs (_solveTimeSteppingSchemes solve)
     transformEntry (order, expr) = (show order, toDoc expr)
 
+data Interpolation = Interpolation
+  { _interpolationOrder :: Integer
+  , _interpolationDerivatives :: [Integer]
+  , _interpolationExpression :: Expression SpatialTerminal
+  } deriving Show
+
+instance PrettyPrintable Interpolation
+  where
+  toDoc interp = structureDoc "Interpolation"
+    [ ("order", toDoc $ _interpolationOrder interp)
+    , ("derivatives", toDoc . show $ _interpolationDerivatives interp)
+    , ("expression", toDoc $ _interpolationExpression interp)
+    ]
+
 data FieldTemporalDerivative
   = FieldTemporalDerivative String Integer
   deriving (Eq, Ord, Show)
@@ -170,6 +181,7 @@ instance PrettyPrintable FieldTemporalDerivative
 data Update = Update
   { _updateLHS :: FieldTemporalDerivative
   , _updateRHS :: Tensor (Expression Terminal)
+  , _updateInterpolations :: Map [Integer] Interpolation
   } deriving Show
 
 instance PrettyPrintable Update
@@ -177,7 +189,12 @@ instance PrettyPrintable Update
   toDoc update = structureDoc "Update"
     [ ("lhs", toDoc $ _updateLHS update)
     , ("rhs", toDoc $ _updateRHS update)
+    , ("interpolations", interpolationDoc)
     ]
+    where
+      interpolationDoc = structureDoc "Map" fields
+      fields = fieldDoc <$> (Map.assocs $ _updateInterpolations update)
+      fieldDoc (derivatives, expr) = (show derivatives, toDoc expr)
 
 buildDiscreteForm :: Parser.FDFL -> Discretised
 buildDiscreteForm fdfl = Discretised { _discretisedMeshes = catMaybes maybeMeshes }
@@ -213,7 +230,7 @@ buildSolve fdfl mesh solve = Solve
  { _solveName = Parser.stringLiteralValue $ Parser._solveName solve
  , _solveSpatialOrder = Parser._solveSpatialOrder solve
  , _solveTemporalOrder = temporalOrder
- , _solveUpdates = (buildUpdate fdfl mesh . getExpressionDef) <$> (Parser._solveEquations solve)
+ , _solveUpdates = (buildUpdate fdfl mesh solve . getExpressionDef) <$> (Parser._solveEquations solve)
  , _solveTimeSteppingSchemes = Map.fromList [(n, buildAdamsBashForth n) | n <- [1..temporalOrder]]
  }
  where
@@ -226,14 +243,23 @@ buildAdamsBashForth :: Integer -> Expression TemporalTerminal
 buildAdamsBashForth order =
   adamsBashforth DeltaT (Symbol PreviousValue) [Symbol $ PreviousDerivative i | i <- [0..order-1]]
 
-buildUpdate :: Parser.FDFL -> Parser.Mesh -> Parser.Equation -> Update
-buildUpdate fdfl mesh equ = Update
+buildUpdate :: Parser.FDFL -> Parser.Mesh -> Parser.Solve -> Parser.Equation -> Update
+buildUpdate fdfl mesh solve equ = Update
   { _updateLHS = buildLHS $ Parser._fieldUpdateLHS equ
   , _updateRHS = buildRHS $ Parser._fieldUpdateRHS equ
+  , _updateInterpolations = Map.fromList $ map (\derivatives -> (derivatives, interpolation derivatives)) $
+      (genericTake dimension $ repeat 0):(genericTake dimension . iterate rotate $ genericTake dimension (1 : repeat 0))
   }
   where
+  rotate xs = zipWith const (drop 1 (cycle xs)) xs
   getFieldName = Parser.stringLiteralValue . Parser._fieldName
   dimension = Parser._meshDimension mesh
+  order = Parser._solveSpatialOrder solve
+  interpolation derivatives = Interpolation
+    { _interpolationOrder = order
+    , _interpolationDerivatives = derivatives
+    , _interpolationExpression = (computeInterpolation order (genericTake dimension $ repeat False) derivatives)
+    }
   buildLHS expr = case expr of
     (Parser.FieldTemporalDerivative (Parser.FieldRef ident)) ->
       FieldTemporalDerivative (getFieldName $ Parser.getFieldDef fdfl ident) 1
