@@ -211,7 +211,7 @@ simplify' (Abs (ConstantRational r)) = ConstantRational $ abs r
 simplify' (Abs (ConstantFloat f)) = ConstantFloat $ abs f
 simplify' (Signum (ConstantRational r)) = ConstantRational $ signum r
 simplify' (Signum (ConstantFloat f)) = ConstantFloat $ signum f
-simplify' (Diff e sym i) = genericIndex (iterate (diff' sym) e)  i
+simplify' (Diff e sym i) = genericIndex (iterate (diff' sym) e) i
 simplify' (Int e sym) = integrate' sym e
 simplify' e = e
 

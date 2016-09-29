@@ -1,5 +1,5 @@
 module FDGEN.Discrete (buildDiscreteForm) where
-import FDGEN.Algebra (Expression(..), diff, adamsBashforth)
+import FDGEN.Algebra (Expression(..), diff, adamsBashforth, lagrange)
 import FDGEN.Tensor (Tensor, TensorIndex)
 import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, vListDoc)
 import Control.Applicative ((<$>))
@@ -29,7 +29,6 @@ instance PrettyPrintable Terminal
       indexDoc [] = PrettyPrint.empty
       indexDoc indices = toDoc $ show indices
 
-
 data TemporalTerminal
   = PreviousValue
   | DeltaT
@@ -44,6 +43,47 @@ instance PrettyPrintable TemporalTerminal
     PreviousDerivative i -> PrettyPrint.hcat $ toDoc <$> ["f(n-", i', ")"]
       where
       i' = show i
+
+data SpatialTerminal
+  = SpatialDelta Integer
+  | FieldValue [Integer]
+  | Position Integer
+  deriving (Eq, Ord, Show)
+
+instance PrettyPrintable SpatialTerminal
+  where
+  toDoc t = case t of
+    SpatialDelta i -> toDoc $ "dx" ++ show i
+    FieldValue idx -> toDoc $ "y" ++ show idx
+    Position i -> toDoc $ "x" ++ show i
+
+computeInterpolation :: Integer -> [Bool] -> [Integer] -> Expression SpatialTerminal
+computeInterpolation order staggering derivatives =
+  if length staggering /= length derivatives
+  then error $ "computeIterpolation: inconsistent dimension specification"
+  else doDerivatives 0 derivatives interpolated
+    where
+    interpolated = buildLagrange 0 stencilWidths []
+    stencilWidths = stencilWidth <$> zip staggering derivatives
+    dimension = length derivatives
+    stencilWidth (stagger, derivative) = if stagger || derivative > 0
+      then max 1 $ order + derivative --TODO: check with mathematician
+      else 1
+    buildLagrange _ [] _ = error "buildLangrange: must be called with at least 1 dimension"
+    buildLagrange dim (width:ws) idx =
+      lagrange variable [(pointPos n, pointValue n) | n <- [0 .. width-1]]
+      where
+      variable = Symbol $ Position dim
+      pointPos n = (Symbol $ SpatialDelta dim) * fromInteger n
+      pointValue n = case ws of
+        [] -> Symbol $ FieldValue idx'
+        _ -> buildLagrange (dim+1) ws idx'
+        where
+        idx' = idx ++ [n]
+    doDerivatives _ [] expr = expr
+    doDerivatives dim (d:ds) expr = doDerivatives (dim + 1) ds expr'
+      where
+      expr' = genericIndex (iterate (diff (Position dim)) expr) d
 
 data FieldAccess = FieldAccess {
   _fieldAccessName :: String,
