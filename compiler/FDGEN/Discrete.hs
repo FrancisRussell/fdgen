@@ -137,7 +137,6 @@ data Solve = Solve
   , _solveSpatialOrder :: Integer
   , _solveTemporalOrder :: Integer
   , _solveUpdates :: [Update]
-  , _solveTimeSteppingSchemes :: Map Integer (Expression TemporalTerminal)
 } deriving Show
 
 instance PrettyPrintable Solve
@@ -147,12 +146,7 @@ instance PrettyPrintable Solve
     , ("spatial_order", toDoc $ _solveSpatialOrder solve)
     , ("temporal_order", toDoc $ _solveTemporalOrder solve)
     , ("updates", vListDoc $ _solveUpdates solve)
-    , ("time_stepping_schemes", schemesDoc)
     ]
-    where
-    schemesDoc = structureDoc "Map" entries
-    entries = transformEntry <$> Map.assocs (_solveTimeSteppingSchemes solve)
-    transformEntry (order, expr) = (show order, toDoc expr)
 
 data Interpolation = Interpolation
   { _interpolationOrder :: Integer
@@ -182,6 +176,7 @@ data Update = Update
   { _updateLHS :: FieldTemporalDerivative
   , _updateRHS :: Tensor (Expression Terminal)
   , _updateInterpolations :: Map [Integer] Interpolation
+  , _updateTimeSteppingSchemes :: Map Integer (Expression TemporalTerminal)
   } deriving Show
 
 instance PrettyPrintable Update
@@ -190,11 +185,15 @@ instance PrettyPrintable Update
     [ ("lhs", toDoc $ _updateLHS update)
     , ("rhs", toDoc $ _updateRHS update)
     , ("interpolations", interpolationDoc)
+    , ("time_stepping_schemes", schemesDoc)
     ]
     where
     interpolationDoc = structureDoc "Map" fields
     fields = fieldDoc <$> (Map.assocs $ _updateInterpolations update)
     fieldDoc (derivatives, expr) = (show derivatives, toDoc expr)
+    schemesDoc = structureDoc "Map" schemeEntries
+    schemeEntries = transformEntry <$> Map.assocs (_updateTimeSteppingSchemes update)
+    transformEntry (order, expr) = (show order, toDoc expr)
 
 buildDiscreteForm :: Parser.FDFL -> Discretised
 buildDiscreteForm fdfl = Discretised { _discretisedMeshes = catMaybes maybeMeshes }
@@ -231,7 +230,6 @@ buildSolve fdfl mesh solve = Solve
   , _solveSpatialOrder = Parser._solveSpatialOrder solve
   , _solveTemporalOrder = temporalOrder
   , _solveUpdates = (buildUpdate fdfl mesh solve . getExpressionDef) <$> (Parser._solveEquations solve)
-  , _solveTimeSteppingSchemes = Map.fromList [(n, buildAdamsBashForth n) | n <- [1..temporalOrder]]
   }
   where
   temporalOrder = Parser._solveTemporalOrder solve
@@ -249,12 +247,14 @@ buildUpdate fdfl mesh solve equ = Update
   , _updateRHS = buildRHS $ Parser._fieldUpdateRHS equ
   , _updateInterpolations = Map.fromList $ map (\derivatives -> (derivatives, interpolation derivatives)) $
       (genericTake dimension $ repeat 0):(genericTake dimension . iterate rotate $ genericTake dimension (1 : repeat 0))
+  , _updateTimeSteppingSchemes = Map.fromList [(n, buildAdamsBashForth n) | n <- [1..temporalOrder]]
   }
   where
   rotate xs = zipWith const (drop 1 (cycle xs)) xs
   getFieldName = Parser.stringLiteralValue . Parser._fieldName
   dimension = Parser._meshDimension mesh
   order = Parser._solveSpatialOrder solve
+  temporalOrder = Parser._solveTemporalOrder solve
   interpolation derivatives = Interpolation
     { _interpolationOrder = order
     , _interpolationDerivatives = derivatives
