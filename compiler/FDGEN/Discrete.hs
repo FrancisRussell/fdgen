@@ -1,5 +1,5 @@
 module FDGEN.Discrete (buildDiscreteForm) where
-import FDGEN.Algebra (Expression(..), diff, adamsBashforth, lagrange)
+import FDGEN.Algebra (Expression(..), diff, adamsBashforthGeneral, lagrange)
 import FDGEN.Tensor (Tensor, TensorIndex)
 import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, vListDoc)
 import Control.Applicative ((<$>))
@@ -168,7 +168,9 @@ data FieldTemporalDerivative
 
 instance PrettyPrintable FieldTemporalDerivative
   where
-  toDoc (FieldTemporalDerivative f i) = PrettyPrint.hcat $ PrettyPrint.text <$> ["(d^", i', " * ", f, ")/dt^", i']
+  toDoc (FieldTemporalDerivative f i) = if i /= 0
+    then PrettyPrint.hcat $ toDoc <$> ["(d^", i', " * ", f, ")/dt^", i']
+    else toDoc f
     where
     i' = show i
 
@@ -237,32 +239,38 @@ buildSolve fdfl mesh solve = Solve
     Just (Parser.EquationDef equ) -> equ
     _ -> error $ "buildSolve: unknown equation " ++ Parser.identifierValue ident
 
-buildAdamsBashForth :: Integer -> Expression TemporalTerminal
-buildAdamsBashForth order =
-  adamsBashforth DeltaT (Symbol PreviousValue) [Symbol $ PreviousDerivative i | i <- [0..order-1]]
+buildAdamsBashForth :: Integer -> Integer -> Expression TemporalTerminal
+buildAdamsBashForth numDerivatives order =
+  adamsBashforthGeneral numDerivatives DeltaT (Symbol PreviousValue) $ (Symbol . PreviousDerivative) <$> [0 .. order - 1]
 
 buildUpdate :: Parser.FDFL -> Parser.Mesh -> Parser.Solve -> Parser.Equation -> Update
 buildUpdate fdfl mesh solve equ = Update
-  { _updateLHS = buildLHS $ Parser._fieldUpdateLHS equ
-  , _updateRHS = buildRHS $ Parser._fieldUpdateRHS equ
+  { _updateLHS = lhs
+  , _updateRHS = rhs
   , _updateInterpolations = Map.fromList $ map (\derivatives -> (derivatives, interpolation derivatives)) $
       (genericTake dimension $ repeat 0):(genericTake dimension . iterate rotate $ genericTake dimension (1 : repeat 0))
-  , _updateTimeSteppingSchemes = Map.fromList [(n, buildAdamsBashForth n) | n <- [1..temporalOrder]]
+  , _updateTimeSteppingSchemes = timestepping
   }
   where
   rotate xs = zipWith const (drop 1 (cycle xs)) xs
   getFieldName = Parser.stringLiteralValue . Parser._fieldName
   dimension = Parser._meshDimension mesh
   order = Parser._solveSpatialOrder solve
+  lhs = buildLHS $ Parser._fieldUpdateLHS equ
+  rhs = buildRHS $ Parser._fieldUpdateRHS equ
   temporalOrder = Parser._solveTemporalOrder solve
+  timestepping = case lhs of
+    FieldTemporalDerivative _ d -> Map.fromList [(n, buildAdamsBashForth d n) | n <- [1..temporalOrder]]
   interpolation derivatives = Interpolation
     { _interpolationOrder = order
     , _interpolationDerivatives = derivatives
     , _interpolationExpression = (computeInterpolation order (genericTake dimension $ repeat False) derivatives)
     }
   buildLHS expr = case expr of
-    (Parser.FieldTemporalDerivative (Parser.FieldRef ident)) ->
+    Parser.FieldTemporalDerivative (Parser.FieldRef ident) ->
       FieldTemporalDerivative (getFieldName $ Parser.getFieldDef fdfl ident) 1
+    Parser.FieldRef ident ->
+      FieldTemporalDerivative (getFieldName $ Parser.getFieldDef fdfl ident) 0
     _ -> error $ "Unsupported LHS: " ++ show expr
   buildRHS :: Parser.FieldExpr Parser.Identifier -> Tensor (Expression Terminal)
   buildRHS expr = case expr of
