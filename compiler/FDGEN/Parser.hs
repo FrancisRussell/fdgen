@@ -395,45 +395,45 @@ class FDFLObject a where
 
 instance FDFLObject Field where
   wrapObject = FieldDef
-  emptyObject = Field {
-      _fieldSymmetric = False,
-      _fieldName = error "undefined fieldName",
-      _fieldRank = error "undefined fieldRank",
-      _fieldStaggerStrategySpatial = None,
-      _fieldStaggerStrategyTemporal = None
+  emptyObject = Field
+    { _fieldSymmetric = False
+    , _fieldName = error "undefined fieldName"
+    , _fieldRank = error "undefined fieldRank"
+    , _fieldStaggerStrategySpatial = None
+    , _fieldStaggerStrategyTemporal = None
     }
 
 instance FDFLObject Mesh where
   wrapObject = MeshDef
-  emptyObject = Mesh {
-      _meshName = error "undefined meshName",
-      _meshDimension = error "undefined meshDimension",
-      _meshFields = [],
-      _meshSolves = []
+  emptyObject = Mesh
+    { _meshName = error "undefined meshName"
+    , _meshDimension = error "undefined meshDimension"
+    , _meshFields = []
+    , _meshSolves = []
     }
 
 instance FDFLObject Equation where
   wrapObject = EquationDef
-  emptyObject = Equation {
-    _fieldUpdateLHS = error "undefined fieldUpdateLHS",
-    _fieldUpdateRHS = error "undefined fieldUpdateRHS"
-  }
+  emptyObject = Equation
+    { _fieldUpdateLHS = error "undefined fieldUpdateLHS"
+    , _fieldUpdateRHS = error "undefined fieldUpdateRHS"
+    }
 
 instance FDFLObject Constant where
   wrapObject = ConstantDef
-  emptyObject = Constant {
-    _constantName = error "undefined constantName",
-    _constantRank = 0
-  }
+  emptyObject = Constant
+    { _constantName = error "undefined constantName"
+    , _constantRank = 0
+    }
 
 instance FDFLObject Solve where
   wrapObject = SolveDef
-  emptyObject = Solve {
-    _solveName = error "undefined solveName",
-    _solveSpatialOrder = 1,
-    _solveTemporalOrder = 1,
-    _solveEquations = []
-  }
+  emptyObject = Solve
+    { _solveName = error "undefined solveName"
+    , _solveSpatialOrder = 1
+    , _solveTemporalOrder = 1
+    , _solveEquations = []
+    }
 
 class FDFLParsable a where
   parse :: Parsec String FDFLParseState a
@@ -443,40 +443,43 @@ instance FDFLParsable s => FDFLParsable [s] where
 
 instance FDFLParsable (FieldExpr Identifier) where
   parse = expr
-    where expr = buildExpressionParser table term
-          term = choice [ parseUnary "grad" FieldGradient
-                 , parseUnary "div" FieldDivergence
-                 , parseUnary "laplace" (FieldDivergence . FieldGradient)
-                 , parseUnary "Dt" FieldTemporalDerivative
-                 , parseBinary "inner" FieldInner
-                 , parseBinary "outer" FieldOuter
-                 , parseBinary "dot" FieldDot
-                 , parseUnary "Dx" $ flip FieldSpatialDerivative 0
-                 , parseUnary "Dy" $ flip FieldSpatialDerivative 1
-                 , parseUnary "Dz" $ flip FieldSpatialDerivative 2
-                 , FieldLiteral <$> parse
-                 , FieldRef <$> (parse >>= isFieldLike)
-                 , parseParens expr
-                 ]
-          parseUnary name constructor =
-            parseReserved name >> constructor <$> parseParens parse
-          parseBinary name constructor =
-            parseReserved name >>
-            (uncurry constructor) <$> parseParens parsePair
-          parsePair = do
-            first <- parse
-            _ <- parseComma
-            second <- parse
-            return (first, second)
-          table = [ [ Prefix $ parseSymbol "-" >> return negate' ]
-                  , [ Infix (parseSymbol "*" >> return FieldOuter) AssocLeft
-                    , Infix (parseSymbol "/" >> return FieldDivision) AssocLeft
-                    ]
-                  , [ Infix (parseSymbol "+" >> return FieldAddition) AssocLeft
-                    , Infix (parseSymbol "-" >> return (\a -> FieldAddition a . negate')) AssocLeft
-                    ]
-                  ]
-          negate' = FieldOuter . FieldLiteral . ScalarConstant $ -1.0
+    where
+    expr = buildExpressionParser table term
+    term = choice
+      [ parseUnary "grad" FieldGradient
+      , parseUnary "div" FieldDivergence
+      , parseUnary "laplace" (FieldDivergence . FieldGradient)
+      , parseUnary "Dt" FieldTemporalDerivative
+      , parseBinary "inner" FieldInner
+      , parseBinary "outer" FieldOuter
+      , parseBinary "dot" FieldDot
+      , parseUnary "Dx" $ flip FieldSpatialDerivative 0
+      , parseUnary "Dy" $ flip FieldSpatialDerivative 1
+      , parseUnary "Dz" $ flip FieldSpatialDerivative 2
+      , FieldLiteral <$> parse
+      , FieldRef <$> (parse >>= isFieldLike)
+      , parseParens expr
+      ]
+    parseUnary name constructor =
+      parseReserved name >> constructor <$> parseParens parse
+    parseBinary name constructor =
+      parseReserved name >>
+      (uncurry constructor) <$> parseParens parsePair
+    parsePair = do
+      first <- parse
+      _ <- parseComma
+      second <- parse
+      return (first, second)
+    table =
+      [ [ Prefix $ parseSymbol "-" >> return negate' ]
+      , [ Infix (parseSymbol "*" >> return FieldOuter) AssocLeft
+        , Infix (parseSymbol "/" >> return FieldDivision) AssocLeft
+        ]
+      , [ Infix (parseSymbol "+" >> return FieldAddition) AssocLeft
+        , Infix (parseSymbol "-" >> return (\a -> FieldAddition a . negate')) AssocLeft
+        ]
+      ]
+    negate' = FieldOuter . FieldLiteral . ScalarConstant $ -1.0
 
 parseBoundedEnum :: (Show a, Enum a, Bounded a) => FDFLParser a
 parseBoundedEnum = choice $ toParser <$> values
@@ -504,8 +507,8 @@ instance FDFLParsable LiteralConstant where
           , ScalarConstant <$> parseFloat
           ]
     where
-      parseNullary name constructor =
-        parseReserved name >> const constructor <$> parseParens spaces
+    parseNullary name constructor =
+      parseReserved name >> const constructor <$> parseParens spaces
 
 containsSymbol :: FDFL -> Identifier -> Bool
 containsSymbol fdfl = isJust . getSymbol fdfl
@@ -524,27 +527,27 @@ addDefinition fdfl symName def = if containsSymbol fdfl symName
   else Right fdfl { symbols = Map.insert (identifierValue symName) def $ symbols fdfl}
 
 fdflDef :: LanguageDef st
-fdflDef = emptyDef {
-  caseSensitive = True,
-  reservedOpNames = ["="],
-  reservedNames = ["True", "False"],
-  commentLine = "#",
-  identStart = letter
-}
+fdflDef = emptyDef
+  { caseSensitive = True
+  , reservedOpNames = ["="]
+  , reservedNames = ["True", "False"]
+  , commentLine = "#"
+  , identStart = letter
+  }
 
-TokenParser {
-  identifier = parseIdentifier,
-  reservedOp = parseReservedOp,
-  reserved = parseReserved,
-  parens = parseParens,
-  commaSep = parseCommaSep,
-  comma = parseComma,
-  stringLiteral = parseStringLiteral,
-  integer = parseInteger,
-  brackets = parseBrackets,
-  float = parseFloat,
-  symbol = parseSymbol
-} = makeTokenParser fdflDef
+TokenParser
+  { identifier = parseIdentifier
+  , reservedOp = parseReservedOp
+  , reserved = parseReserved
+  , parens = parseParens
+  , commaSep = parseCommaSep
+  , comma = parseComma
+  , stringLiteral = parseStringLiteral
+  , integer = parseInteger
+  , brackets = parseBrackets
+  , float = parseFloat
+  , symbol = parseSymbol
+  } = makeTokenParser fdflDef
 
 parseFDFL :: FDFLParser FDFLParseState
 parseFDFL =

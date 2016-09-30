@@ -34,7 +34,7 @@ structureDoc :: String -> [(String, Doc)] -> Doc
 structureDoc name fields = text name $+$ text "{" $+$ nest 2 fieldsDoc $+$ text "}"
   where
   fieldsDoc = foldl ($+$) empty $ punctuate (text ",") $ renderField <$> fields
-  renderField (name, doc) = hsep [text name, text "=", doc]
+  renderField (fname, doc) = hsep [text fname, text "=", doc]
 
 hListDoc :: PrettyPrintable e => [e] -> Doc
 hListDoc elements = text "[" <> (hcat $ punctuate (text ", ") (toDoc <$> elements)) <> text "]"
@@ -42,6 +42,6 @@ hListDoc elements = text "[" <> (hcat $ punctuate (text ", ") (toDoc <$> element
 vListDoc :: PrettyPrintable e => [e] -> Doc
 vListDoc elements = foldl ($+$) empty $ (indent $ toDoc <$> elements) ++ [text "]"]
   where
-    indent (d:ds) = (indent' "[" d):(map (indent' ",") ds)
-    indent [] = [text "["]
-    indent' prefix content = hcat [text prefix <> text " ", content]
+  indent (d:ds) = (indent' "[" d):(map (indent' ",") ds)
+  indent [] = [text "["]
+  indent' prefix content = hcat [text prefix <> text " ", content]

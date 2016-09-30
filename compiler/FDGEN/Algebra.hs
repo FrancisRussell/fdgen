@@ -94,11 +94,11 @@ extractMultiplier (Sum seq') = case _psRewriteState seq' of
 extractMultiplier e = (1, simplify e)
 
 instance PairSeqLike SumTag e where
-  empty = PairSeq {
-    _psOverall = 0,
-    _psTerms = Map.empty,
-    _psRewriteState = NonNormal
-  }
+  empty = PairSeq
+    {  _psOverall = 0
+    ,  _psTerms = Map.empty
+    ,  _psRewriteState = NonNormal
+    }
   extractMultipliers seq' = Map.foldlWithKey addScaledTerm base (_psTerms seq')
     where
     base = Lens.set psOverall (_psOverall seq') (empty :: PairSeq SumTag e)
@@ -110,23 +110,23 @@ instance PairSeqLike SumTag e where
   addTerm expr coeff seq' = case expr of
       ConstantRational r -> Lens.over psOverall (+ (r * coeff)) seq'
       Sum subSeq -> foldl' addTerm' seq' (toPairs subSeq)
-       where
-       addTerm' s (e, c) = addTerm e (c * coeff) s
+        where
+        addTerm' s (e, c) = addTerm e (c * coeff) s
       _ -> normalInsert
       where
       normalInsert = incrementTerm expr coeff seq'
 
 instance PairSeqLike ProdTag e where
-  empty = PairSeq {
-    _psOverall = 1,
-    _psTerms = Map.empty,
-    _psRewriteState = NonNormal
-  }
+  empty = PairSeq
+    { _psOverall = 1
+    , _psTerms = Map.empty
+    , _psRewriteState = NonNormal
+    }
   extractMultipliers seq' = if _psOverall rebuilt == 0
     then Lens.set psOverall 0 (empty :: PairSeq ProdTag e)
     else rebuilt
     where
-    rebuilt = Map.foldlWithKey addScaledTerm base (_psTerms seq')
+    rebuilt = Map.foldlWithKey addScaledTerm base $ _psTerms seq'
     base = Lens.set psOverall (_psOverall seq') (empty :: PairSeq ProdTag e)
     addScaledTerm :: PairSeq ProdTag e -> Expression e -> Rational -> PairSeq ProdTag e
     addScaledTerm ps expr coeff = newSeq
@@ -140,19 +140,18 @@ instance PairSeqLike ProdTag e where
   addTerm expr coeff seq' = newSeq
     where
     isIntegerCoeff = denominator coeff == 1
+    normalInsert = incrementTerm expr coeff seq'
     newSeq = if isIntegerCoeff
       then case expr of
         ConstantRational r -> Lens.over psOverall (* (r ^^ numerator coeff)) seq'
-        Product subSeq -> foldl' addTerm' seq' (toPairs subSeq)
-         where
-         addTerm' s (e, c) = addTerm e (c * coeff) s
+        Product subSeq -> foldl' addTerm' seq' $ toPairs subSeq
+          where
+          addTerm' s (e, c) = addTerm e (c * coeff) s
         _ -> normalInsert
       else normalInsert
-      where
-      normalInsert = incrementTerm expr coeff seq'
 
 incrementTerm :: Ord e => Expression e -> Rational -> PairSeq t e -> PairSeq t e
-incrementTerm expr coeff = Lens.over psTerms (Map.insertWith (+) expr coeff)
+incrementTerm expr coeff = Lens.over psTerms $ Map.insertWith (+) expr coeff
 
 toPairs :: PairSeqLike t e => PairSeq t e -> [(Expression e, Rational)]
 toPairs seq' = if hasNullOverall seq'
@@ -163,12 +162,10 @@ toPairs seq' = if hasNullOverall seq'
   terms = Map.assocs $ _psTerms seq'
 
 fromPairs :: (Ord e, PairSeqLike t e) => [(Expression e, Rational)] -> PairSeq t e
-fromPairs pairs = foldl' (flip $ uncurry addTerm) empty pairs
+fromPairs = foldl' (flip $ uncurry addTerm) empty
 
 removeZeros :: PairSeq t e -> PairSeq t e
-removeZeros seq' = seq' { _psTerms = terms' }
-  where
-  terms' = Map.filter (/= 0) $ _psTerms seq'
+removeZeros = Lens.over psTerms $ Map.filter (/= 0)
 
 add :: Ord e => Expression e -> Expression e -> Expression e
 add a b = Sum $ fromPairs [(a, 1), (b, 1)]
@@ -186,7 +183,7 @@ raise :: Ord e => Expression e -> Rational -> Expression e
 raise a b = Product $ fromPairs [(a, b)]
 
 hasNullOverall :: forall t e . PairSeqLike t e => PairSeq t e -> Bool
-hasNullOverall seq' = (_psOverall seq') == (_psOverall (empty :: PairSeq t e))
+hasNullOverall seq' = _psOverall seq' == _psOverall (empty :: PairSeq t e)
 
 simplifyPairSeq :: (PairSeqLike t e, Ord e) => PairSeq t e -> Expression e
 simplifyPairSeq seq' = newExpr
@@ -216,10 +213,10 @@ simplify' (Int e sym) = integrate' sym e
 simplify' e = e
 
 rewrite :: Ord e => (Expression e -> Expression e) -> Expression e -> Expression e
-rewrite f e = simplify' . f $ rewrite' f e
+rewrite f = simplify' . f . rewrite' f
 
 rewritePairSeq :: (Ord e, PairSeqLike t e) => (Expression e -> Expression e) -> PairSeq t e -> PairSeq t e
-rewritePairSeq f seq' = foldl' addTerm' empty $ toPairs seq'
+rewritePairSeq f = foldl' addTerm' empty . toPairs
   where
   addTerm' s (e, r) = addTerm (rewrite f e) r s
 
@@ -239,40 +236,40 @@ rewrite' _ e@(ConstantRational _) = e
 rewriteSymbol :: (Expression e -> Expression e) -> e -> e
 rewriteSymbol f sym = case f (Symbol sym) of
   Symbol s -> s
-  _ -> error $ "rewriteSymbol: cannot subsitute variable with complex expression"
+  _ -> error "rewriteSymbol: cannot subsitute variable with complex expression"
 
 subst :: Ord e => Expression e -> Expression e -> Expression e -> Expression e
-subst from to e = simplify $ rewrite update e
+subst from to = simplify . rewrite update
   where
   update e' = if e' == from then to else e'
 
 substSymbols :: (Ord e, Ord f) => (e -> f) -> Expression e -> Expression f
 substSymbols f expr = case expr of
-  (Symbol s) -> Symbol $ f s
-  (ConstantFloat r) -> ConstantFloat r
-  (ConstantRational r) -> ConstantRational r
-  (Abs e) -> Abs $ substSymbols f e
-  (Ln e) -> Ln $ substSymbols f e
-  (Signum e) -> Signum $ substSymbols f e
-  (Sum seq') -> Sum $ fromPairs $ transformPair <$> toPairs seq'
-  (Product seq') -> Product $ fromPairs $ transformPair <$> toPairs seq'
-  (Diff e sym i) -> Diff (substSymbols f e) (f sym) i
-  (Int e sym ) -> Int (substSymbols f e) (f sym)
-  (Function sym params) -> Function (f sym) (substSymbols f <$> params)
+  Symbol s -> Symbol $ f s
+  ConstantFloat r -> ConstantFloat r
+  ConstantRational r -> ConstantRational r
+  Abs e -> Abs $ substSymbols f e
+  Ln e -> Ln $ substSymbols f e
+  Signum e -> Signum $ substSymbols f e
+  Sum seq' -> Sum . fromPairs $ transformPair <$> toPairs seq'
+  Product seq' -> Product . fromPairs $ transformPair <$> toPairs seq'
+  Diff e sym i -> Diff (substSymbols f e) (f sym) i
+  Int e sym -> Int (substSymbols f e) (f sym)
+  Function sym params -> Function (f sym) (substSymbols f <$> params)
   where
   transformPair (e, r) = (substSymbols f e, r)
 
 lagrange :: Ord e => Expression e -> [(Expression e, Expression e)] -> Expression e
 lagrange sym points  = foldl' (+) 0 bases
   where
-  bases = [constructBasis j | j <- [0 .. (length points - 1)]]
+  bases = constructBasis <$> [0 .. (length points - 1)]
   constructBasis j = foldl' (*) yj $ map term pointIndices
     where
-      (xj, yj) = points !! j
-      pointIndices = filter (/=j) [0 .. (length points - 1)]
-      term k = (sym - xk) / (xj - xk)
-        where
-          (xk, _) = points !! k
+    (xj, yj) = points !! j
+    pointIndices = filter (/=j) [0 .. (length points - 1)]
+    term k = (sym - xk) / (xj - xk)
+      where
+      (xk, _) = points !! k
 
 depends :: Ord e => Set e -> Expression e -> Bool
 depends syms (Symbol s) = Set.member s syms
@@ -301,33 +298,33 @@ diff sym = simplify . diff' sym
 
 diff' :: Ord e => e -> Expression e -> Expression e
 diff' sym expression = case expression of
-  (ConstantFloat _) -> 0
-  (ConstantRational _) -> 0
-  (Symbol s) -> if s == sym then 1 else 0
-  (Abs x) -> (Signum x) * diff sym x
-  (Signum _) -> 0
-  (Ln x) -> raise x (-1) * diff sym x
-  (Sum seq') -> Sum $ fromPairs differentiatedPairs
+  ConstantFloat _ -> 0
+  ConstantRational _ -> 0
+  Symbol s -> if s == sym then 1 else 0
+  Abs x -> Signum x * diff sym x
+  Signum _ -> 0
+  Ln x -> raise x (-1) * diff sym x
+  Sum seq' -> Sum $ fromPairs differentiatedPairs
     where
-    differentiatedPairs = map (\(a,b) -> (diff sym a, b)) $ toPairs seq'
-  (Product seq') -> Sum $ fromPairs subTerms
+    differentiatedPairs = (\(a,b) -> (diff sym a, b)) <$> toPairs seq'
+  Product seq' -> Sum $ fromPairs subTerms
     where
     pairs = toPairs seq'
-    subTerms = map (constructSubTerm . extractElem pairs) [0 .. length pairs - 1]
+    subTerms = (constructSubTerm . extractElem pairs) <$> [0 .. length pairs - 1]
     constructSubTerm ((expr, power), rest) = (Product $ fromPairs newTerms, power)
       where
       newTerms = (diff sym expr, 1):(expr, power - 1):rest
-  (Diff e s i) -> if sym == s
+  Diff e s i -> if sym == s
     then Diff e s (i+1)
     else diffNoun
-  (Int e s) -> if sym == s
+  Int e s -> if sym == s
     then e
     else diffNoun
-  (Function _ _) -> diffNoun
+  Function _ _ -> diffNoun
   where
-    diffNoun = if depends (Set.singleton sym) expression
-      then Diff expression sym 1
-      else 0
+  diffNoun = if depends (Set.singleton sym) expression
+    then Diff expression sym 1
+    else 0
 
 splitPairSeqDepends :: (PairSeqLike t e, Ord e) => Set e -> PairSeq t e -> ([(Expression e, Rational)], [(Expression e, Rational)])
 splitPairSeqDepends syms seq' = foldl' combine ([], []) $ toPairs seq'
@@ -335,61 +332,58 @@ splitPairSeqDepends syms seq' = foldl' combine ([], []) $ toPairs seq'
   combine (dep, nodep) (expr, coeff) = if depends syms expr
     then (addTerm' dep, nodep)
     else (dep, addTerm' nodep)
-      where
-      addTerm' terms = (expr, coeff):terms
+    where
+    addTerm' terms = (expr, coeff):terms
 
 definiteIntegrate :: Ord e => e -> Expression e -> Expression e -> Expression e -> Expression e
-definiteIntegrate sym low high expr = expand $ highInt - lowInt
+definiteIntegrate sym low high expr = expand $ (intAt high) - (intAt low)
   where
   integrated = integrate sym expr
-  lowInt = subst (Symbol sym) low integrated
-  highInt = subst (Symbol sym) high integrated
+  intAt i = subst (Symbol sym) i integrated
 
 integrate :: Ord e => e -> Expression e -> Expression e
 integrate sym = simplify . integrate' sym . expand
 
 integrate' :: Ord e => e -> Expression e -> Expression e
 integrate' sym expr = case expr of
-  (Abs _) -> integrateByParts sym expr 1
-  (Signum _) -> integrateByParts sym expr 1
-  (Ln _) -> integrateByParts sym expr 1
-  (ConstantFloat _) -> Symbol sym * expr
-  (ConstantRational _) -> Symbol sym * expr
-  (Symbol s) -> if s == sym
-    then ((Symbol s) ^ (2 :: Integer)) * (fromRational $ 1 % 2)
+  Abs _ -> integrateByParts sym expr 1
+  Signum _ -> integrateByParts sym expr 1
+  Ln _ -> integrateByParts sym expr 1
+  ConstantFloat _ -> Symbol sym * expr
+  ConstantRational _ -> Symbol sym * expr
+  Symbol s -> if s == sym
+    then (Symbol s ^ (2 :: Integer)) * (fromRational $ 1 % 2)
     else Symbol s * Symbol sym
-  (Sum seq') -> Sum $ fromPairs integratedPairs
+  Sum seq' -> Sum $ fromPairs integratedPairs
     where
     integratedPairs = map (\(a, b) -> (integrate sym a, b)) $ toPairs seq'
-  (Product seq') -> integratedDep * (Product $ fromPairs indep)
+  Product seq' -> integratedDep * (Product $ fromPairs indep)
     where
     (dep, indep) = splitPairSeqDepends (Set.singleton sym) seq'
     integratedDep = integrateProductSeq sym dep
-  (Diff _ _ _) -> intNoun
-  (Int _ _) -> intNoun
-  (Function _ _) -> intNoun
+  Diff _ _ _ -> intNoun
+  Int _ _ -> intNoun
+  Function _ _ -> intNoun
   where
-   intNoun = if depends (Set.singleton sym) expr
-     then Int expr sym
-     else Symbol sym * expr
+  intNoun = if depends (Set.singleton sym) expr
+    then Int expr sym
+    else Symbol sym * expr
 
 integrateProductSeq :: Ord e => e -> [(Expression e, Rational)] -> Expression e
 integrateProductSeq sym [] = Symbol sym
-integrateProductSeq sym [(expr, exp')] = if exp' == 0
-  then Symbol sym
-  else if expr == Symbol sym
-  then if exp' /= -1
-    then (raise (Symbol sym) (exp' + 1)) / fromRational (exp' + 1)
-    else Ln $ Symbol sym
-  else if exp' == 1
-  then integrate sym expr
-  else if exp' > 1 && denominator exp' == 1
-  then integrateProductSeq sym [(expr, exp1 % 1), (expr, exp2 % 1)]
-  else error "Cannot integrate negative or fractional exponents of complex expression"
-    where
-    iexp = numerator exp'
-    exp1 = iexp `div` 2
-    exp2 = iexp - exp1
+integrateProductSeq sym [(expr, exp')]
+  | exp' == 0       = symExpr
+  | expr == symExpr = if exp' /= -1
+                        then raise symExpr (exp' + 1) / fromRational (exp' + 1)
+                        else Ln symExpr
+  | exp' == 1       = integrate sym expr
+  | exp' > 1 && denominator exp' == 1 = integrateProductSeq sym [(expr, exp1 % 1), (expr, exp2 % 1)]
+  | otherwise = error "Cannot integrate negative or fractional exponents of complex expression"
+  where
+  symExpr = Symbol sym
+  iexp = numerator exp'
+  exp1 = iexp `div` 2
+  exp2 = iexp - exp1
 integrateProductSeq sym [(expr1, 1), (expr2, 1)] = integrateByParts sym expr1 expr2
 integrateProductSeq sym pairs = integrateByParts sym prod1 prod2
   where
@@ -398,8 +392,7 @@ integrateProductSeq sym pairs = integrateByParts sym prod1 prod2
   prod2 = Product $ fromPairs pairs2
 
 integrateByParts :: Ord e => e -> Expression e -> Expression e -> Expression e
-integrateByParts sym toDiff toInt =
-  if (u == 0)
+integrateByParts sym toDiff toInt = if (u == 0)
   then 0
   else u * iv + remainder
   where
@@ -421,7 +414,7 @@ expand expr = fixed rewrites
   fixed (x1:x2:xs) = if x1 == x2 then x1 else fixed (x2:xs)
   fixed _ = error "fixed should be applied to infinite list"
 
-expand' :: forall e . Ord e => Expression e -> Expression e
+expand' :: Ord e => Expression e -> Expression e
 expand' (Product seq') = constructExpandedProduct $ toPairs seq'
 expand' x = x
 
@@ -432,7 +425,7 @@ mulSum seq' (Sum seq'') = fromPairs result
     (e1, c1) <- toPairs seq'
     (e2, c2) <- toPairs seq''
     return (e1 * e2, c1 * c2)
-mulSum seq' expr = fromPairs . map (\(a,b) -> (a * expr, b)) $ toPairs seq'
+mulSum seq' expr = fromPairs $ (\(a,b) -> (a * expr, b)) <$> toPairs seq'
 
 constructExpandedProduct :: forall e . Ord e => [(Expression e, Rational)] ->
                             Expression e
@@ -460,10 +453,10 @@ constructExpandedProduct seq' = Sum $ mulSum numeratorTerm denominatorTerm
       then error "Cannot raise to negative exponent"
       else constructExpandedProduct prodTerms
       where
-        even' = constructExpandedProduct [(expr, fromInteger $ n `div` 2)]
-        prodTerms = if n `mod` 2 == 0
-          then [(even', 1), (even', 1)]
-          else [(expr, fromInteger $ n - 1), (expr, 1)]
+      even' = constructExpandedProduct [(expr, fromInteger $ n `div` 2)]
+      prodTerms = if n `mod` 2 == 0
+        then [(even', 1), (even', 1)]
+        else [(expr, fromInteger $ n - 1), (expr, 1)]
 
 
 data TempSymbol e
@@ -481,13 +474,13 @@ fromTempSymbol (Temporary s) = error $ "fromTempSymbol: unexpected symbol " ++ s
 adamsBashforth :: Ord e => e -> Expression e -> [Expression e] -> Expression e
 adamsBashforth h y0 fs = y0 + substSymbols fromTempSymbol integrated
   where
-    hSym = Symbol $ Original h
-    var = Temporary "x"
-    genPoints _ [] = []
-    genPoints hCoeff (d:ds) = (hCoeff * hSym, d):(genPoints (hCoeff-1) ds)
-    points = genPoints (-1) $ substSymbols toTempSymbol <$> fs
-    interpolatedDerivatives = lagrange (Symbol var) points
-    integrated = definiteIntegrate var (-hSym) 0 interpolatedDerivatives
+  hSym = Symbol $ Original h
+  var = Temporary "x"
+  genPoints _ [] = []
+  genPoints hCoeff (d:ds) = (hCoeff * hSym, d):(genPoints (hCoeff-1) ds)
+  points = genPoints (-1) $ substSymbols toTempSymbol <$> fs
+  interpolatedDerivatives = lagrange (Symbol var) points
+  integrated = definiteIntegrate var (-hSym) 0 interpolatedDerivatives
 
 instance Ord e => Num (Expression e) where
   fromInteger = ConstantRational . fromInteger
