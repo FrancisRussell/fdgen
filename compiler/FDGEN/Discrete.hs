@@ -266,12 +266,11 @@ buildUpdate fdfl mesh solve equ = Update
     , _interpolationDerivatives = derivatives
     , _interpolationExpression = (computeInterpolation order (genericTake dimension $ repeat False) derivatives)
     }
-  buildLHS expr = case expr of
-    Parser.FieldTemporalDerivative (Parser.FieldRef ident) ->
-      FieldTemporalDerivative (getFieldName $ Parser.getFieldDef fdfl ident) 1
-    Parser.FieldRef ident ->
-      FieldTemporalDerivative (getFieldName $ Parser.getFieldDef fdfl ident) 0
-    _ -> error $ "Unsupported LHS: " ++ show expr
+  buildLHS expr = buildDerivative 0 expr
+    where
+    buildDerivative n (Parser.FieldTemporalDerivative subExpr) = buildDerivative (n + 1) subExpr
+    buildDerivative n (Parser.FieldRef ident) = FieldTemporalDerivative (getFieldName $ Parser.getFieldDef fdfl ident) n
+    buildDerivative _ _ = error $ "Unsupported LHS: " ++ show expr
   buildRHS :: Parser.FieldExpr Parser.Identifier -> Tensor (Expression Terminal)
   buildRHS expr = case expr of
     Parser.FieldTemporalDerivative _ -> error "buildUpdate: Temporal derivative not expected in RHS"
