@@ -336,10 +336,14 @@ splitPairSeqDepends syms seq' = foldl' combine ([], []) $ toPairs seq'
     addTerm' terms = (expr, coeff):terms
 
 definiteIntegrate :: Ord e => e -> Expression e -> Expression e -> Expression e -> Expression e
-definiteIntegrate sym low high expr = expand $ (intAt high) - (intAt low)
+definiteIntegrate sym low high =
+  differenceAtLimits sym low high . integrate sym
+
+differenceAtLimits :: Ord e => e -> Expression e -> Expression e -> Expression e -> Expression e
+differenceAtLimits sym low high expr =
+  expand $ (exprAt high) - (exprAt low)
   where
-  integrated = integrate sym expr
-  intAt i = subst (Symbol sym) i integrated
+  exprAt pos = subst (Symbol sym) pos expr
 
 integrate :: Ord e => e -> Expression e -> Expression e
 integrate sym = simplify . integrate' sym . expand
