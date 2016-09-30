@@ -1,6 +1,6 @@
 {-# LANGUAGE TemplateHaskell, EmptyDataDecls, FlexibleInstances, MultiParamTypeClasses, ScopedTypeVariables #-}
 module FDGEN.Algebra ( Expression(..), subst, lagrange, diff, integrate, expand
-                     , definiteIntegrate, adamsBashforth) where
+                     , definiteIntegrate, adamsBashforth, adamsBashforthGeneral) where
 import Data.Map.Strict (Map)
 import Data.Set (Set)
 import Data.List (genericIndex)
@@ -476,7 +476,12 @@ fromTempSymbol (Original s) = s
 fromTempSymbol (Temporary s) = error $ "fromTempSymbol: unexpected symbol " ++ s ++ " in expression"
 
 adamsBashforth :: Ord e => e -> Expression e -> [Expression e] -> Expression e
-adamsBashforth h y0 fs = y0 + substSymbols fromTempSymbol integrated
+adamsBashforth = adamsBashforthGeneral 1
+
+adamsBashforthGeneral :: Ord e => Integer -> e -> Expression e -> [Expression e] -> Expression e
+adamsBashforthGeneral numInt h y0 fs = if numInt < 0
+ then error "adamsBashforthGeneral: number of integrals must be >=0"
+ else y0 + substSymbols fromTempSymbol defInt
   where
   hSym = Symbol $ Original h
   var = Temporary "x"
@@ -484,7 +489,8 @@ adamsBashforth h y0 fs = y0 + substSymbols fromTempSymbol integrated
   genPoints hCoeff (d:ds) = (hCoeff * hSym, d):(genPoints (hCoeff-1) ds)
   points = genPoints (-1) $ substSymbols toTempSymbol <$> fs
   interpolatedDerivatives = lagrange (Symbol var) points
-  integrated = definiteIntegrate var (-hSym) 0 interpolatedDerivatives
+  defInt = differenceAtLimits var (-hSym) 0 indefInt
+  indefInt = genericIndex (iterate (integrate var) interpolatedDerivatives) numInt
 
 instance Ord e => Num (Expression e) where
   fromInteger = ConstantRational . fromInteger
