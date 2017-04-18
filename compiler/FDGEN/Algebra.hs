@@ -9,7 +9,7 @@ import Data.Foldable (foldl')
 import FDGEN.Pretty (PrettyPrintable(..))
 import Text.PrettyPrint (Doc, hcat, char, parens, punctuate)
 import Control.Applicative ((<$>))
-import qualified Data.Map as Map
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Control.Lens as Lens
 

@@ -1,4 +1,4 @@
-module FDGEN.Discrete (buildDiscreteForm) where
+module FDGEN.Discrete (buildDiscreteForm, buildTemplateDictionary) where
 import FDGEN.Algebra (Expression(..), diff, adamsBashforthGeneral, lagrange)
 import FDGEN.Tensor (Tensor, TensorIndex)
 import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, vListDoc)
@@ -9,6 +9,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified FDGEN.Parser as Parser
 import qualified FDGEN.Tensor as Tensor
+import qualified FDGEN.Template as Template
 import qualified Text.PrettyPrint as PrettyPrint
 
 data Terminal
@@ -203,6 +204,9 @@ buildDiscreteForm fdfl = Discretised { _discretisedMeshes = catMaybes maybeMeshe
   maybeMeshes = maybeBuildMesh <$> Map.elems (Parser.getSymbols fdfl)
   maybeBuildMesh (Parser.MeshDef meshDef) = Just $ buildMesh fdfl meshDef
   maybeBuildMesh _ = Nothing
+
+buildTemplateDictionary :: Discretised -> Template.Dict
+buildTemplateDictionary _ = Template.emptyDict
 
 buildMesh :: Parser.FDFL -> Parser.Mesh -> Mesh
 buildMesh fdfl mesh = Mesh
