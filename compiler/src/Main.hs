@@ -24,6 +24,6 @@ processFile filename = do
       Right spec -> (putStrLn $ prettyPrint spec) >>
                     putStrLn "" >>
                     (putStrLn . prettyPrint $ discreteForm) >>
-                    (putStrLn $ Template.apply template $ buildTemplateDictionary discreteForm)
+                    (putStrLn $ Template.apply (buildTemplateDictionary discreteForm) template)
                     where
                     discreteForm = buildDiscreteForm spec
