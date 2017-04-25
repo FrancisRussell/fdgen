@@ -206,7 +206,7 @@ buildDiscreteForm fdfl = Discretised { _discretisedMeshes = catMaybes maybeMeshe
   maybeBuildMesh _ = Nothing
 
 buildTemplateDictionary :: Discretised -> Template.Dict
-buildTemplateDictionary _ = Template.emptyDict
+buildTemplateDictionary _ = Template.insert "mesh_name" (Template.StringVal "themesh") Template.emptyDict
 
 buildMesh :: Parser.FDFL -> Parser.Mesh -> Mesh
 buildMesh fdfl mesh = Mesh
