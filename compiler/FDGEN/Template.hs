@@ -5,9 +5,15 @@ import qualified Data.Map.Strict as Map
 import Text.Parsec.Language (emptyDef, LanguageDef)
 import Text.Parsec (ParsecT, ParseError, runParser, getState, Parsec, putState, try)
 import Text.Parsec.Token (GenTokenParser(..), GenLanguageDef(..), makeTokenParser)
-import Text.Parsec.Combinator (eof, choice, optionMaybe)
+import Text.Parsec.Combinator (eof, choice, manyTill, optionMaybe)
 import Text.Parsec.Char (anyChar, char, string, noneOf)
 import Text.Parsec.Prim (many, parserFail)
+
+data Template
+  = TemplateSequence [Template]
+  | TemplateVariable String
+  | ForDirective String String Template
+  | NonSpecial String
 
 data Val
   = StringVal String
@@ -19,30 +25,32 @@ data Dict = Dict {
   _dictMappings :: Map String Val
 } deriving Show
 
-TokenParser {
-} = makeTokenParser emptyDef
+TokenParser
+  { identifier = parseIdentifier
+  , reserved = parseReserved
+  } = makeTokenParser emptyDef
 
 data TemplateParseState = TemplateParseState {
   _stateDict :: Dict
 }
 
-type TemplateParser a = Parsec String TemplateParseState a
+type TemplateParser = Parsec String TemplateParseState Template
 
 buildParseState :: Dict -> TemplateParseState
 buildParseState dict = TemplateParseState {
   _stateDict = dict
 }
 
-parseTemplate :: TemplateParser String
+parseTemplate :: TemplateParser
 parseTemplate = concat <$> (many $ choice parsers)
   where
   parsers = [ parseLookupDirective
             , parseExpressionDirective
-            , parseCharacter
+            , parseNonSpecial
             ]
 
-parseCharacter :: TemplateParser String
-parseCharacter = return <$> anyChar
+parseNonSpecial :: TemplateParser
+parseNonSpecial = manyTill anyChar (try $ string "$")
 
 parseLookupDirective :: TemplateParser String
 parseLookupDirective = do
@@ -60,11 +68,22 @@ parseExpressionDirective = do
   state <- getState
   parserFailEither <$> return $ lookupScalar directive (_stateDict state)
 
-parseExpression :: TemplateParser String
+parseExpression :: TemplateParser
 parseExpression = parseFor
 
-parseFor :: TemplateParser String
-parseFor = parserFail "for parsing is unimplemented"
+parseFor :: TemplateParser
+parseFor = do
+          parseReserved "for"
+          name <- parseIdentifier
+          parseReserved "in"
+          path <- parseIdentifier
+          section <- parseSection
+          return section
+
+parseSection :: TemplateParser
+parseSection = do
+  separator <- parseIdentifier
+  return separator
 
 lookupScalar :: String -> Dict -> Either String String
 lookupScalar key dict = case Map.lookup key (_dictMappings dict) of
