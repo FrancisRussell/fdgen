@@ -1,5 +1,4 @@
 #include <vector>
 
-
 struct mesh_${mesh_name} {
 };

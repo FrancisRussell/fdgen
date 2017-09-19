@@ -9,11 +9,10 @@ import Text.Parsec.Combinator (eof, choice, many1, manyTill, optionMaybe)
 import Text.Parsec.Char (anyChar, char, string, noneOf)
 import Text.Parsec.Prim (many, parserFail)
 
-data Template
-  = TemplateSequence [Template]
-  | TemplateVariable String
-  | ForDirective String String Template
-  | NonSpecial String
+data TemplateElement
+  = Text String
+  | Lookup String
+  deriving Show
 
 data Val
   = StringVal String
@@ -34,7 +33,8 @@ data TemplateParseState = TemplateParseState {
   _stateDict :: Dict
 }
 
-type TemplateParser = Parsec String TemplateParseState String
+type TemplateParser = Parsec String TemplateParseState [TemplateElement]
+type TemplateElementParser = Parsec String TemplateParseState TemplateElement
 
 buildParseState :: Dict -> TemplateParseState
 buildParseState dict = TemplateParseState {
@@ -42,27 +42,25 @@ buildParseState dict = TemplateParseState {
 }
 
 parseTemplate :: TemplateParser
-parseTemplate = concat <$> (many $ choice parsers)
+parseTemplate = many $ choice parsers
   where
   parsers = [ parseNonSpecial
             , parseDirective
             ]
 
-parseDirective :: TemplateParser
+parseDirective :: TemplateElementParser
 parseDirective = do
   try $ string "${"
   content <- parseDirective'
   string "}"
   return content
 
-parseDirective' :: TemplateParser
+parseDirective' :: TemplateElementParser
 parseDirective' = do
-  state <- getState
-  parserFailEither $ lookupScalar (_stateDict state) <$> parseIdentifier
+  Lookup <$> parseIdentifier
 
-
-parseNonSpecial :: TemplateParser
-parseNonSpecial = many1 $ noneOf ['$']
+parseNonSpecial :: TemplateElementParser
+parseNonSpecial = Text <$> (many1 $ noneOf ['$'])
 
 lookupScalar :: Dict -> String -> Either String String
 lookupScalar dict key = case Map.lookup key (_dictMappings dict) of
@@ -78,9 +76,10 @@ parserFailEither p = do
     Left str -> parserFail str
 
 populate :: Dict -> String -> Either ParseError String
-populate dict template = runParser parseTemplate parseState "<template>" template
+populate dict template = show <$> parsedTemplate
   where
   parseState = buildParseState dict
+  parsedTemplate = runParser parseTemplate parseState "<template>" template
 
 emptyDict :: Dict
 emptyDict = Dict
