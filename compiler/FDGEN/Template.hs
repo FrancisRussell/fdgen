@@ -5,7 +5,7 @@ import qualified Data.Map.Strict as Map
 import Text.Parsec.Language (emptyDef, LanguageDef)
 import Text.Parsec (ParsecT, ParseError, runParser, getState, Parsec, putState, try)
 import Text.Parsec.Token (GenTokenParser(..), GenLanguageDef(..), makeTokenParser)
-import Text.Parsec.Combinator (eof, choice, manyTill, optionMaybe)
+import Text.Parsec.Combinator (eof, choice, many1, manyTill, optionMaybe)
 import Text.Parsec.Char (anyChar, char, string, noneOf)
 import Text.Parsec.Prim (many, parserFail)
 
@@ -34,7 +34,7 @@ data TemplateParseState = TemplateParseState {
   _stateDict :: Dict
 }
 
-type TemplateParser = Parsec String TemplateParseState Template
+type TemplateParser = Parsec String TemplateParseState String
 
 buildParseState :: Dict -> TemplateParseState
 buildParseState dict = TemplateParseState {
@@ -44,49 +44,28 @@ buildParseState dict = TemplateParseState {
 parseTemplate :: TemplateParser
 parseTemplate = concat <$> (many $ choice parsers)
   where
-  parsers = [ parseLookupDirective
-            , parseExpressionDirective
-            , parseNonSpecial
+  parsers = [ parseNonSpecial
+            , parseDirective
             ]
 
-parseNonSpecial :: TemplateParser
-parseNonSpecial = manyTill anyChar (try $ string "$")
-
-parseLookupDirective :: TemplateParser String
-parseLookupDirective = do
+parseDirective :: TemplateParser
+parseDirective = do
   try $ string "${"
-  directive <- many $ noneOf "}"
+  content <- parseDirective'
   string "}"
+  return content
+
+parseDirective' :: TemplateParser
+parseDirective' = do
   state <- getState
-  parserFailEither <$> return $ lookupScalar directive (_stateDict state)
+  parserFailEither $ lookupScalar (_stateDict state) <$> parseIdentifier
 
-parseExpressionDirective :: TemplateParser String
-parseExpressionDirective = do
-  try $ string "$("
-  directive <- parseExpression
-  string ")"
-  state <- getState
-  parserFailEither <$> return $ lookupScalar directive (_stateDict state)
 
-parseExpression :: TemplateParser
-parseExpression = parseFor
+parseNonSpecial :: TemplateParser
+parseNonSpecial = many1 $ noneOf ['$']
 
-parseFor :: TemplateParser
-parseFor = do
-          parseReserved "for"
-          name <- parseIdentifier
-          parseReserved "in"
-          path <- parseIdentifier
-          section <- parseSection
-          return section
-
-parseSection :: TemplateParser
-parseSection = do
-  separator <- parseIdentifier
-  return separator
-
-lookupScalar :: String -> Dict -> Either String String
-lookupScalar key dict = case Map.lookup key (_dictMappings dict) of
+lookupScalar :: Dict -> String -> Either String String
+lookupScalar dict key = case Map.lookup key (_dictMappings dict) of
   Just (StringVal s) -> Right s
   Just _ -> Left $ "Key " ++ key ++ " does not map to scalar"
   _ -> Left $ "Key " ++ key ++ " not found"
@@ -102,9 +81,6 @@ populate :: Dict -> String -> Either ParseError String
 populate dict template = runParser parseTemplate parseState "<template>" template
   where
   parseState = buildParseState dict
-
-processDirective :: Dict -> String -> String
-processDirective dict str = error "unimplemented directive"
 
 emptyDict :: Dict
 emptyDict = Dict

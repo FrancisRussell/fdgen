@@ -1,35 +1,5 @@
 #include <vector>
 
 
-$(for mesh in meshes) #
 struct mesh_${mesh_name} {
-  $(for field_name in fields.name) #
-    std::vector<double> field_${field_name};
-  #
-  size_t extents[$(size(dimensions))];
-
-  $(for update in updates) #
-    $(for field in update.fields) #
-      double stencil_$(update.name)_$(field.name)[] = { $(splice(", ", field.stencil) };
-    #
-  #
-
-  void step() {
-    for(size_t i = 0; i < $(foldl(dimensions.extent, *)); ++i) {
-      size_t pos[$(size(dimensions))] = { $(splice(", ", repeat("0", size(dimensions)) };
-      $(for dimension in dimensions) #
-      ++pos[dimension.index];
-      if (pos[dimension.index] == $(dimension.extent))
-        pos[dimension.index] == 0;
-      #
-
-      $(for update in updates) #
-        $(update.field_name)[i] =
-      #
-    }
-  }
 };
-
-#
-
-//stencil[?] * field_field_$(field_name)[i + entry.];
