@@ -1,4 +1,12 @@
 #include <vector>
 
-struct mesh_${mesh_name} {
+${for mesh in meshes}
+class mesh_${mesh.name} {
+private:
+  size_t extents[${mesh.dimension}];
+  ${for field in mesh.fields}
+  std::vector<double[${field.num_components}]> ${field.name};
+  ${end}
+public:
 };
+${end}

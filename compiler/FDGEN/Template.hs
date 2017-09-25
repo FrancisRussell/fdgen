@@ -5,13 +5,17 @@ import qualified Data.Map.Strict as Map
 import Text.Parsec.Language (emptyDef, LanguageDef)
 import Text.Parsec (ParsecT, ParseError, runParser, getState, Parsec, putState, try)
 import Text.Parsec.Token (GenTokenParser(..), GenLanguageDef(..), makeTokenParser)
-import Text.Parsec.Combinator (eof, choice, many1, manyTill, optionMaybe)
+import Text.Parsec.Combinator (eof, choice, many1, manyTill, optionMaybe, sepBy1)
 import Text.Parsec.Char (anyChar, char, string, noneOf)
 import Text.Parsec.Prim (many, parserFail)
 
+type Path = [ String ]
+
 data TemplateElement
   = Text String
-  | Lookup String
+  | Lookup Path
+  | ForEach String Path
+  | End
   deriving Show
 
 data Val
@@ -56,8 +60,28 @@ parseDirective = do
   return content
 
 parseDirective' :: TemplateElementParser
-parseDirective' = do
-  Lookup <$> parseIdentifier
+parseDirective' = choice
+  [ parseFor,
+    parseEnd,
+    parseLookup
+  ]
+
+parsePath :: Parsec String TemplateParseState Path
+parsePath = sepBy1 parseIdentifier $ string "."
+
+parseLookup :: TemplateElementParser
+parseLookup = Lookup <$> parsePath
+
+parseEnd :: TemplateElementParser
+parseEnd = parseReserved "end" >> return End
+
+parseFor :: TemplateElementParser
+parseFor = do
+  parseReserved "for"
+  id <- parseIdentifier
+  parseReserved "in"
+  path <- parsePath
+  return $ ForEach id path
 
 parseNonSpecial :: TemplateElementParser
 parseNonSpecial = Text <$> (many1 $ noneOf ['$'])
