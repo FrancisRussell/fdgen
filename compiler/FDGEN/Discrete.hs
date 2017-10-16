@@ -206,7 +206,24 @@ buildDiscreteForm fdfl = Discretised { _discretisedMeshes = catMaybes maybeMeshe
   maybeBuildMesh _ = Nothing
 
 buildTemplateDictionary :: Discretised -> Template.Dict
-buildTemplateDictionary _ = Template.insert "mesh_name" (Template.StringVal "themesh") Template.emptyDict
+buildTemplateDictionary discretised = Template.insert "meshes" (Template.ListVal $ Template.DictVal <$> meshes) Template.emptyDict
+  where
+  meshes = buildMeshDictionary discretised <$> _discretisedMeshes discretised
+
+buildMeshDictionary :: Discretised -> Mesh -> Template.Dict
+buildMeshDictionary discretised mesh = Map.fromList
+  [ ("name", Template.StringVal $ _meshName mesh)
+  , ("dimension", Template.StringVal . show $ _meshDimension mesh)
+  , ("fields", Template.ListVal $ Template.DictVal . buildFieldDictionary discretised mesh <$> _meshFields mesh)
+  ]
+
+buildFieldDictionary :: Discretised -> Mesh -> Field -> Template.Dict
+buildFieldDictionary _ mesh field = Map.fromList
+  [ ("name", Template.StringVal $ _fieldName field)
+  , ("num_components", Template.StringVal . show $ num_components)
+  ]
+  where
+  num_components = (_meshDimension mesh) ^ (_fieldRank field)
 
 buildMesh :: Parser.FDFL -> Parser.Mesh -> Mesh
 buildMesh fdfl mesh = Mesh
