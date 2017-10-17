@@ -6,10 +6,10 @@ import Data.Map.Strict (Map)
 import qualified Control.Lens as Lens
 import qualified Data.Map.Strict as Map
 import Text.Parsec.Language (emptyDef, LanguageDef)
-import Text.Parsec (ParsecT, ParseError, runParser, getState, Parsec, putState, try)
+import Text.Parsec (ParsecT, ParseError, runParser, Parsec, try)
 import Text.Parsec.Token (GenTokenParser(..), GenLanguageDef(..), makeTokenParser)
-import Text.Parsec.Combinator (eof, choice, many1, manyTill, optionMaybe, sepBy1)
-import Text.Parsec.Char (anyChar, char, letter, string, noneOf)
+import Text.Parsec.Combinator (eof, choice, many1, sepBy1)
+import Text.Parsec.Char (letter, string, noneOf)
 import Text.Parsec.Prim (many, parserFail)
 
 type Path = [ String ]
@@ -55,6 +55,7 @@ class NestedScopeLike a where
 instance NestedScopeLike Scope where
   pushScope scope dicts = scope:dicts
   popScope (_:dicts) = dicts
+  popScope [] = error "Attempted to pop scope from empty stack."
 
 instance NestedScopeLike StringBuilder where
   pushScope dict = Lens.over sbScope (pushScope dict)
@@ -67,7 +68,7 @@ instance ScopeLike Scope where
   scopeLookup binding (d:ds) = case scopeLookup binding d of
     Just val -> Just val
     Nothing -> scopeLookup binding ds
-  scopeLookup binding [] = Nothing
+  scopeLookup _ [] = Nothing
 
 instance ScopeLike StringBuilder where
   scopeLookup binding sb = scopeLookup binding $ _sbScope sb
@@ -122,7 +123,7 @@ parseBlock = many $ choice parsers
 parseDirectiveWrapper :: Parsec String TemplateParseState e -> Parsec String TemplateParseState e
 parseDirectiveWrapper contentParser = do
   content <- try (string "${" >> contentParser)
-  string "}"
+  _ <- string "}"
   return content
 
 parseDirective :: TemplateElementParser
@@ -142,17 +143,17 @@ parseEnd = parseDirectiveWrapper (parseReserved "end") >> return ()
 
 parseFor :: TemplateElementParser
 parseFor = do
-  (id, path) <- parseDirectiveWrapper parseSpecial
+  (ident, path) <- parseDirectiveWrapper parseSpecial
   block <- parseBlock
   parseEnd
-  return $ ForEach id path block
+  return $ ForEach ident path block
   where
   parseSpecial = do
     parseReserved "for"
-    id <- parseIdentifier
+    ident <- parseIdentifier
     parseReserved "in"
     path <- parsePath
-    return (id, path)
+    return (ident, path)
 
 parseNonSpecial :: TemplateElementParser
 parseNonSpecial = Text <$> (many1 $ noneOf ['$'])
@@ -187,14 +188,13 @@ populateTemplate dict template = _sbResult <$> foldM populateTemplate' initial t
   populateTemplate' builder (ForEach binding path body) = do
     bindingsVal <- scopeLookupPath path builder
     bindings <- valToList bindingsVal
-    foldM (doIteration binding body) builder bindings
+    foldM (doIteration body) builder bindings
     where
-    doIteration :: String -> [TemplateElement] -> StringBuilder -> Val -> Either String StringBuilder
-    doIteration binding elements sb val = popScope <$> sb''
+    doIteration :: [TemplateElement] -> StringBuilder -> Val -> Either String StringBuilder
+    doIteration elements sb val = popScope <$> sb''
       where
       sb' = pushScope (Map.fromList [(binding, val)]) sb
       sb'' = foldM populateTemplate' sb' elements
-  populateTemplate' _ e = error $ "Unimplemented: " ++ show e
 
 populate :: Dict -> String -> Either ParseError String
 populate dict template = show <$> populatedTemplate
