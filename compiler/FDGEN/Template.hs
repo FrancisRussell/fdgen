@@ -196,12 +196,12 @@ populateTemplate dict template = _sbResult <$> foldM populateTemplate' initial t
       sb' = pushScope (Map.fromList [(binding, val)]) sb
       sb'' = foldM populateTemplate' sb' elements
 
-populate :: Dict -> String -> Either ParseError String
-populate dict template = show <$> populatedTemplate
+populate :: Dict -> String -> Either String String
+populate dict template = populatedTemplate
   where
   parseState = ()
   parsedTemplate = runParser parseTemplate parseState "<template>" template
-  populatedTemplate = populateTemplate dict <$> parsedTemplate
+  populatedTemplate = populateTemplate dict =<< (Lens.over Lens._Left show parsedTemplate)
 
 emptyDict :: Dict
 emptyDict = Map.empty
