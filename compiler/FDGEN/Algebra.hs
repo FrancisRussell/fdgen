@@ -1,5 +1,5 @@
 {-# LANGUAGE TemplateHaskell, EmptyDataDecls, FlexibleInstances, MultiParamTypeClasses, ScopedTypeVariables #-}
-module FDGEN.Algebra ( Expression(..), subst, lagrange, diff, integrate, expand
+module FDGEN.Algebra ( Expression(..), subst, substSymbols, lagrange, diff, integrate, expand
                      , definiteIntegrate, adamsBashforth, adamsBashforthGeneral) where
 import Data.Map.Strict (Map)
 import Data.Set (Set)
