@@ -3,10 +3,16 @@
 ${for mesh in meshes}
 class mesh_${mesh.name} {
 private:
+  static const size_t dimension = ${mesh.dimension};
   size_t extents[${mesh.dimension}];
   ${for field in mesh.fields}
   std::vector<double[${field.num_components}]> ${field.name};
   ${end}
 public:
+  mesh_${mesh.name}(size_t _extents[${mesh.dimension}]) {
+    for (size_t dim = 0; dim < ${mesh.dimension}; ++dim) {
+      extents[dim] = _extents[dim];
+    }
+  }
 };
 ${end}
