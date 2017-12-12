@@ -56,8 +56,9 @@ buildStencil spec = assert (length derivatives == length staggering) result
     else order + derivative
   stencilWidths = uncurry stencilWidth <$> zip staggering derivatives
   originGrid = (`div` 2) <$> stencilWidths
-  originSubstitutions = (\(dim, gridpoint) -> (Symbol $ Position dim, fromInteger gridpoint * (Symbol $ GridSpacing dim))) <$> zip [0..numDimensions - 1] originGrid
-  interpolation = buildInterpolation stencilWidths
+  centrePoint = (const 0) <$> stencilWidths
+  originSubstitutions = (\(dim, gridpoint) -> (Symbol $ Position dim, fromInteger gridpoint * (Symbol $ GridSpacing dim))) <$> zip [0..numDimensions - 1] centrePoint
+  interpolation = buildInterpolation $ zip3 stencilWidths originGrid staggering
   diff' sym power expression = genericIndex (iterate (diff sym) expression) power
   differentiatedInterpolation = foldl (\expr (dim, power) -> diff' (Position dim) power expr) interpolation (zip [0..numDimensions-1] derivatives)
   interpolatedValue = foldl (\expr (from, to) -> subst from to expr) differentiatedInterpolation originSubstitutions
@@ -66,11 +67,11 @@ buildStencil spec = assert (length derivatives == length staggering) result
   --  , _stencilValues = error "unimplemented"
   --  , _stencilOrigin = originGrid
   --  }
-  buildInterpolation :: [Integer] -> Expression StencilTerminal
+  buildInterpolation :: [(Integer, Integer, Stagger)] -> Expression StencilTerminal
   buildInterpolation = buildInterpolation' . reverse
     where
     buildInterpolation' [] = Symbol $ FieldValue []
-    buildInterpolation' (width:widths) = lagrange (Symbol $ Position dimension) extruded
+    buildInterpolation' ((width, centrePoint, stagger):widths) = lagrange (Symbol $ Position dimension) extruded
       where
       dimension = 0 + genericLength widths
       lowerInterpolation = buildInterpolation' widths
@@ -78,4 +79,8 @@ buildStencil spec = assert (length derivatives == length staggering) result
       extrude position (FieldValue positions) = FieldValue (position:positions)
       extrude _ terminal = terminal
       extrudeExpression position = substSymbols (extrude position)
-      extruded = [(fromInteger i * (Symbol $ GridSpacing dimension), extrudeExpression i lowerInterpolation) | i <- [0..width - 1]]
+      extruded = [((fromInteger i + staggerOffset stagger) * (Symbol $ GridSpacing dimension), extrudeExpression i lowerInterpolation) | i <- (subtract centrePoint) <$> [0..width - 1]]
+      staggerOffset staggering = case staggering of
+        StaggerNone -> 0.0
+        StaggerPos -> 0.5
+        StaggerNeg -> -0.5
