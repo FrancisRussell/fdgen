@@ -56,8 +56,7 @@ buildStencil spec = assert (length derivatives == length staggering) result
     else order + derivative
   stencilWidths = uncurry stencilWidth <$> zip staggering derivatives
   originGrid = (`div` 2) <$> stencilWidths
-  centrePoint = (const 0) <$> stencilWidths
-  originSubstitutions = (\(dim, gridpoint) -> (Symbol $ Position dim, fromInteger gridpoint * (Symbol $ GridSpacing dim))) <$> zip [0..numDimensions - 1] centrePoint
+  originSubstitutions = (\dim -> (Symbol $ Position dim, 0)) <$> [0..numDimensions - 1]
   interpolation = buildInterpolation $ zip3 stencilWidths originGrid staggering
   diff' sym power expression = genericIndex (iterate (diff sym) expression) power
   differentiatedInterpolation = foldl (\expr (dim, power) -> diff' (Position dim) power expr) interpolation (zip [0..numDimensions-1] derivatives)
@@ -79,7 +78,7 @@ buildStencil spec = assert (length derivatives == length staggering) result
       extrude position (FieldValue positions) = FieldValue (position:positions)
       extrude _ terminal = terminal
       extrudeExpression position = substSymbols (extrude position)
-      extruded = [((fromInteger i + staggerOffset stagger) * (Symbol $ GridSpacing dimension), extrudeExpression i lowerInterpolation) | i <- (subtract centrePoint) <$> [0..width - 1]]
+      extruded = [((fromInteger i + staggerOffset stagger), extrudeExpression i lowerInterpolation) | i <- (subtract centrePoint) <$> [0..width - 1]]
       staggerOffset staggering = case staggering of
         StaggerNone -> 0.0
         StaggerPos -> 0.5
