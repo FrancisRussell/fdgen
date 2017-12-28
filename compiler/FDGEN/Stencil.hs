@@ -3,7 +3,7 @@ import Control.Applicative ((<$>))
 import Control.Exception (assert)
 import Data.Char (chr, ord)
 import Data.List (genericIndex, genericLength)
-import FDGEN.Algebra (Expression(..), expand, lagrange, subst, substSymbols, diff)
+import FDGEN.Algebra (Expression(..), expand, lagrange, subst, substSymbols, diff, vars)
 import FDGEN.Pretty (PrettyPrintable, toDoc)
 import Text.PrettyPrint as PrettyPrint
 
@@ -22,7 +22,6 @@ data Stencil = Stencil
   , _stencilValues :: [Double]
   , _stencilOrigin :: [Integer]
   } deriving Show
-
 
 data StencilTerminal
   = GridSpacing Integer
@@ -46,7 +45,7 @@ instance PrettyPrintable StencilTerminal
 buildStencil :: StencilSpec -> Stencil
 buildStencil spec = assert (length derivatives == length staggering) result
   where
-  result = error . show . toDoc $ expand $ interpolatedValue
+  result = expressionToStencil interpolatedValue
   derivatives = _stencilSpecDerivatives spec
   staggering = _stencilSpecStaggering spec
   numDimensions = genericLength derivatives
@@ -61,11 +60,6 @@ buildStencil spec = assert (length derivatives == length staggering) result
   diff' sym power expression = genericIndex (iterate (diff sym) expression) power
   differentiatedInterpolation = foldl (\expr (dim, power) -> diff' (Position dim) power expr) interpolation (zip [0..numDimensions-1] derivatives)
   interpolatedValue = foldl (\expr (from, to) -> subst from to expr) differentiatedInterpolation originSubstitutions
-  --result = Stencil
-  --  { _stencilDimensions = stencilWidths
-  --  , _stencilValues = error "unimplemented"
-  --  , _stencilOrigin = originGrid
-  --  }
   buildInterpolation :: [(Integer, Integer, Stagger)] -> Expression StencilTerminal
   buildInterpolation = buildInterpolation' . reverse
     where
@@ -83,3 +77,7 @@ buildStencil spec = assert (length derivatives == length staggering) result
         StaggerNone -> 0.0
         StaggerPos -> 0.5
         StaggerNeg -> -0.5
+
+expressionToStencil :: Expression StencilTerminal -> Stencil
+expressionToStencil expression = error $ show $  vars expression
+  where variables = vars expression

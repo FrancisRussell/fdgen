@@ -1,6 +1,6 @@
 {-# LANGUAGE TemplateHaskell, EmptyDataDecls, FlexibleInstances, MultiParamTypeClasses, ScopedTypeVariables #-}
 module FDGEN.Algebra ( Expression(..), subst, substSymbols, lagrange, diff, integrate, expand
-                     , definiteIntegrate, adamsBashforth, adamsBashforthGeneral) where
+                     , definiteIntegrate, adamsBashforth, adamsBashforthGeneral, vars ) where
 import Data.Map.Strict (Map)
 import Data.Set (Set)
 import Data.List (genericIndex)
@@ -282,10 +282,25 @@ depends _ (ConstantRational _) = False
 depends syms (Abs expr) = depends syms expr
 depends syms (Signum expr) = depends syms expr
 depends syms (Ln expr) = depends syms expr
-depends syms (Diff e sym _) = Set.member sym syms || depends syms e
-depends syms (Int e sym) = depends (Set.delete sym syms) e
-depends syms (Function sym params) = Set.member sym syms
-  || foldl (||) False (depends syms <$> params)
+depends syms (Diff e _sym _) = depends syms e
+depends syms (Int e sym) = Set.member sym syms || depends syms e
+depends syms (Function sym params) =
+  foldl (||) (Set.member sym syms) (depends syms <$> params)
+
+vars :: Ord e => Expression e -> Set e
+vars (Symbol s) = Set.singleton s
+vars (Sum seq') =
+  foldl (Set.union) Set.empty $ map (\(a, _) -> vars a) (toPairs seq')
+vars (Product seq') =
+  foldl (Set.union) Set.empty $ map (\(a, _) -> vars a) (toPairs seq')
+vars (ConstantFloat _) = Set.empty
+vars (ConstantRational _) = Set.empty
+vars (Abs expr) = vars expr
+vars (Signum expr) = vars expr
+vars (Ln expr) = vars expr
+vars (Diff e _sym _) = vars e
+vars (Int e sym) = Set.insert sym (vars e)
+vars (Function sym params) = foldl Set.union (Set.singleton sym) (vars <$> params)
 
 extractElem :: [a] -> Int -> (a, [a])
 extractElem lst index = (elem', rest)
