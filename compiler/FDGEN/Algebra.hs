@@ -1,6 +1,7 @@
 {-# LANGUAGE TemplateHaskell, EmptyDataDecls, FlexibleInstances, MultiParamTypeClasses, ScopedTypeVariables #-}
 module FDGEN.Algebra ( Expression(..), subst, substSymbols, lagrange, diff, integrate, expand
-                     , definiteIntegrate, adamsBashforth, adamsBashforthGeneral, vars ) where
+                     , definiteIntegrate, adamsBashforth, adamsBashforthGeneral, vars
+                     , polyCoeff, polyCoeffs) where
 import Data.Map.Strict (Map)
 import Data.Set (Set)
 import Data.List (genericIndex)
@@ -9,6 +10,7 @@ import Data.Foldable (foldl')
 import FDGEN.Pretty (PrettyPrintable(..))
 import Text.PrettyPrint (Doc, hcat, char, parens, punctuate)
 import Control.Applicative ((<$>))
+import Control.Monad (liftM2)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified Control.Lens as Lens
@@ -301,6 +303,54 @@ vars (Ln expr) = vars expr
 vars (Diff e _sym _) = vars e
 vars (Int e sym) = Set.insert sym (vars e)
 vars (Function sym params) = foldl Set.union (Set.singleton sym) (vars <$> params)
+
+polyCoeff :: Ord e => Expression e -> e -> Int -> Maybe (Expression e)
+polyCoeff exp sym power = (!! power) <$> (++ repeat 0) <$> polyCoeffs exp sym
+
+polyCoeffs :: Ord e => Expression e -> e -> Maybe [Expression e]
+polyCoeffs exp sym = if depends (Set.singleton sym) exp
+  then polyCoeffs' exp
+  else Just [exp]
+  where
+  combineCoeffs :: Ord e => [Expression e] -> [Expression e] -> [Expression e]
+  combineCoeffs a b = take totalLength $ zipWith (+) a' b'
+    where
+    a' = a ++ (repeat 0)
+    b' = b ++ (repeat 0)
+    totalLength = max (length a) (length b)
+  raiseCoeffs :: Ord e => [Expression e] -> Rational -> Maybe [Expression e]
+  raiseCoeffs e p = if denominator p /= 1 || numerator p < 0
+    then Nothing
+    else case numerator p of
+    0 -> Just [1.0]
+    1 -> Just e
+    num -> if num `mod` 2 == 1
+      then multiplyCoeffs e <$> raisedEven
+      else raisedEven
+      where
+      raisedEven = (liftM2 multiplyCoeffs) half half
+      half = raiseCoeffs e (fromInteger $ num `div` 2)
+  multiplyCoeffs :: Ord e => [Expression e] -> [Expression e] -> [Expression e]
+  multiplyCoeffs a b = [foldl (+) 0 (subTerms idx)| idx <- [0..totalLength-1]]
+    where
+    totalLength = (max 1 (length a)) + (max 1 (length b)) - 1
+    pad l = l ++ (take (totalLength - length l) $ repeat 0)
+    a' = pad a
+    b' = pad b
+    subTerms idx = (\(a,b) -> a * b) <$> (zip a' (drop (totalLength - idx - 1) (reverse b')))
+  polyCoeffs' (Symbol s) = Just $ if s == sym then [0.0, 1.0] else []
+  polyCoeffs' (Sum seq') =
+    foldl (liftM2 combineCoeffs) (Just []) $ map (\(e, c) -> polyCoeffs (fromRational c * e) sym) (toPairs seq')
+  polyCoeffs' (Product seq') =
+    foldl (liftM2 multiplyCoeffs) (Just [1.0]) $ map (\(a, p) -> (flip raiseCoeffs $ p) =<< (polyCoeffs a sym)) (toPairs seq')
+  polyCoeffs' n@(ConstantFloat _) = Just [n]
+  polyCoeffs' n@(ConstantRational _) = Just [n]
+  polyCoeffs' (Abs expr) = Nothing
+  polyCoeffs' (Signum expr) = Nothing
+  polyCoeffs' (Ln expr) = Nothing
+  polyCoeffs' (Diff e _sym _) = Nothing
+  polyCoeffs' (Int e sym) = Nothing
+  polyCoeffs' (Function sym params) = Nothing
 
 extractElem :: [a] -> Int -> (a, [a])
 extractElem lst index = (elem', rest)
