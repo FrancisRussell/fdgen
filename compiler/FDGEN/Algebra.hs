@@ -527,7 +527,6 @@ constructExpandedProduct seq' = Sum $ mulSum numeratorTerm denominatorTerm
         then [(even', 1), (even', 1)]
         else [(expr, fromInteger $ n - 1), (expr, 1)]
 
-
 data TempSymbol e
   = Original e
   | Temporary String

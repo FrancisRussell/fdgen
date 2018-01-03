@@ -3,9 +3,12 @@ import Control.Applicative ((<$>))
 import Control.Exception (assert)
 import Data.Char (chr, ord)
 import Data.List (genericIndex, genericLength)
-import FDGEN.Algebra (Expression(..), expand, lagrange, subst, substSymbols, diff, vars)
+import Data.Map (Map)
+import FDGEN.Algebra (Expression(..), expand, lagrange, subst, substSymbols, diff, vars, polyCoeff)
 import FDGEN.Pretty (PrettyPrintable, toDoc)
 import Text.PrettyPrint as PrettyPrint
+import qualified Data.Set as Set
+import qualified Data.Map as Map
 
 data Stagger = StaggerPos | StaggerNeg | StaggerNone
   deriving (Eq, Ord, Show)
@@ -18,9 +21,8 @@ data StencilSpec = StencilSpec
 
 
 data Stencil = Stencil
-  { _stencilDimensions :: [Integer]
-  , _stencilValues :: [Double]
-  , _stencilOrigin :: [Integer]
+  { _stencilDimension :: Integer
+  , _stencilValues :: Map [Integer] Rational
   } deriving Show
 
 data StencilTerminal
@@ -45,7 +47,7 @@ instance PrettyPrintable StencilTerminal
 buildStencil :: StencilSpec -> Stencil
 buildStencil spec = assert (length derivatives == length staggering) result
   where
-  result = expressionToStencil interpolatedValue
+  result = expressionToStencil numDimensions interpolatedValue
   derivatives = _stencilSpecDerivatives spec
   staggering = _stencilSpecStaggering spec
   numDimensions = genericLength derivatives
@@ -78,6 +80,19 @@ buildStencil spec = assert (length derivatives == length staggering) result
         StaggerPos -> 0.5
         StaggerNeg -> -0.5
 
-expressionToStencil :: Expression StencilTerminal -> Stencil
-expressionToStencil expression = error $ show $  vars expression
-  where variables = vars expression
+expressionToStencil :: Integer -> Expression StencilTerminal -> Stencil
+expressionToStencil dim expression = Stencil
+  { _stencilDimension = dim
+  , _stencilValues = coeffMap
+  }
+  where
+  variables = Set.toList $ vars expression
+  coeffs = getCoeff <$> variables
+  getCoeff var = case polyCoeff expression var 1 of
+    Just (ConstantRational r) -> r
+    _ -> error $ "Could not convert expression to stencil coefficient" ++ show expression
+  indices = getIndex <$> variables
+  getIndex terminal = case terminal of
+    FieldValue idx -> idx
+    _ -> error $ "Unexpected terminal type in stencil expression " ++ show terminal
+  coeffMap = Map.fromList $ zip indices coeffs
