@@ -178,7 +178,6 @@ instance PrettyPrintable FieldTemporalDerivative
 data Update = Update
   { _updateLHS :: FieldTemporalDerivative
   , _updateRHS :: Tensor (Expression Terminal)
-  , _updateInterpolations :: Map [Integer] Interpolation
   , _updateTimeSteppingSchemes :: Map Integer (Expression TemporalTerminal)
   } deriving Show
 
@@ -187,13 +186,9 @@ instance PrettyPrintable Update
   toDoc update = structureDoc "Update"
     [ ("lhs", toDoc $ _updateLHS update)
     , ("rhs", toDoc $ _updateRHS update)
-    , ("interpolations", interpolationDoc)
     , ("time_stepping_schemes", schemesDoc)
     ]
     where
-    interpolationDoc = structureDoc "Map" fields
-    fields = fieldDoc <$> (Map.assocs $ _updateInterpolations update)
-    fieldDoc (derivatives, expr) = (show derivatives, toDoc expr)
     schemesDoc = structureDoc "Map" schemeEntries
     schemeEntries = transformEntry <$> Map.assocs (_updateTimeSteppingSchemes update)
     transformEntry (order, expr) = (show order, toDoc expr)
@@ -268,8 +263,6 @@ buildUpdate :: Parser.FDFL -> Parser.Mesh -> Parser.Solve -> Parser.Equation -> 
 buildUpdate fdfl mesh solve equ = Update
   { _updateLHS = lhs
   , _updateRHS = rhs
-  , _updateInterpolations = Map.fromList $ map (\derivatives -> (derivatives, interpolation derivatives)) $
-      (genericTake dimension $ repeat 0):(genericTake dimension . iterate rotate $ genericTake dimension (1 : repeat 0))
   , _updateTimeSteppingSchemes = timestepping
   }
   where
