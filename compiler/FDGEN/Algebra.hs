@@ -1,7 +1,7 @@
 {-# LANGUAGE TemplateHaskell, EmptyDataDecls, FlexibleInstances, MultiParamTypeClasses, ScopedTypeVariables #-}
 module FDGEN.Algebra ( Expression(..), subst, substSymbols, lagrange, diff, integrate, expand
                      , definiteIntegrate, adamsBashforth, adamsBashforthGeneral, vars
-                     , polyCoeff, polyCoeffs) where
+                     , polyCoeff, polyCoeffs, expandSymbols, rewrite, rewriteFixedPoint) where
 import Data.Map.Strict (Map)
 import Data.Set (Set)
 import Data.List (genericIndex)
@@ -235,7 +235,7 @@ rewrite' _ e@(Symbol _) = e
 rewrite' _ e@(ConstantFloat _) = e
 rewrite' _ e@(ConstantRational _) = e
 
-rewriteSymbol :: (Expression e -> Expression e) -> e -> e
+rewriteSymbol :: (Expression e -> Expression f) -> e -> f
 rewriteSymbol f sym = case f (Symbol sym) of
   Symbol s -> s
   _ -> error "rewriteSymbol: cannot subsitute variable with complex expression"
@@ -246,20 +246,26 @@ subst from to = simplify . rewrite update
   update e' = if e' == from then to else e'
 
 substSymbols :: (Ord e, Ord f) => (e -> f) -> Expression e -> Expression f
-substSymbols f expr = case expr of
-  Symbol s -> Symbol $ f s
+substSymbols f = expandSymbols  (Symbol . f)
+
+expandSymbols :: (Ord e, Ord f) => (e -> Expression f) -> Expression e -> Expression f
+expandSymbols f expr = case expr of
+  Symbol s -> f s
   ConstantFloat r -> ConstantFloat r
   ConstantRational r -> ConstantRational r
-  Abs e -> Abs $ substSymbols f e
-  Ln e -> Ln $ substSymbols f e
-  Signum e -> Signum $ substSymbols f e
+  Abs e -> Abs $ expandSymbols f e
+  Ln e -> Ln $ expandSymbols f e
+  Signum e -> Signum $ expandSymbols f e
   Sum seq' -> Sum . fromPairs $ transformPair <$> toPairs seq'
   Product seq' -> Product . fromPairs $ transformPair <$> toPairs seq'
-  Diff e sym i -> Diff (substSymbols f e) (f sym) i
-  Int e sym -> Int (substSymbols f e) (f sym)
-  Function sym params -> Function (f sym) (substSymbols f <$> params)
+  Diff e sym i -> Diff (expandSymbols f e) (replaceSymbol sym) i
+  Int e sym -> Int (expandSymbols f e) (replaceSymbol sym)
+  Function sym params -> Function (replaceSymbol sym) (expandSymbols f <$> params)
   where
-  transformPair (e, r) = (substSymbols f e, r)
+  transformPair (e, r) = (expandSymbols f e, r)
+  replaceSymbol sym = case f sym of
+    Symbol s -> s
+    _ -> error "expandSymbols: cannot substitute variable with complex expression"
 
 lagrange :: Ord e => Expression e -> [(Expression e, Expression e)] -> Expression e
 lagrange sym points  = foldl' (+) 0 bases
@@ -471,17 +477,20 @@ integrateByParts sym toDiff toInt = if (u == 0)
   du = diff sym u
   remainder = integrate sym $ du*iv*(-1)
 
--- Fails to expand: (a / b + c) * (1 / (h + i))
--- This is due to multiplication of sums raised to negative powers.
--- Using iterate is a hack and might cause infinite iteration if
--- the expanded form is non-unique.
-expand :: Ord e => Expression e -> Expression e
-expand expr = fixed rewrites
+rewriteFixedPoint :: Ord e => (Expression e -> Expression e) -> Expression e -> Expression e
+rewriteFixedPoint f expr = fixed rewrites
   where
-  pass = simplify . rewrite expand'
+  pass = simplify . rewrite f
   rewrites = iterate pass expr
   fixed (x1:x2:xs) = if x1 == x2 then x1 else fixed (x2:xs)
   fixed _ = error "fixed should be applied to infinite list"
+
+-- Fails to expand: (a / b + c) * (1 / (h + i))
+-- This is due to multiplication of sums raised to negative powers.
+-- Using iterate (by using rewriteFixedPoint) is a hack and might cause infinite iteration if
+-- the expanded form is non-unique.
+expand :: Ord e => Expression e -> Expression e
+expand = rewriteFixedPoint expand'
 
 expand' :: Ord e => Expression e -> Expression e
 expand' (Product seq') = constructExpandedProduct $ toPairs seq'
