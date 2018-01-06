@@ -1,5 +1,5 @@
 module FDGEN.Discrete (buildDiscreteForm, buildTemplateDictionary) where
-import FDGEN.Algebra (Expression(..), diff, adamsBashforthGeneral, lagrange, expandSymbols, substSymbols, rewriteFixedPoint)
+import FDGEN.Algebra (Expression(..), diff, adamsBashforthGeneral, expandSymbols, substSymbols, rewriteFixedPoint)
 import FDGEN.Tensor (Tensor, TensorIndex)
 import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, vListDoc)
 import FDGEN.Stencil (StencilSpec(..), Stencil(..), buildStencil)
@@ -105,31 +105,6 @@ instance PrettyPrintable SpatialTerminal
     SpatialDelta i -> toDoc $ "dx" ++ show i
     FieldValue idx -> toDoc $ "y" ++ show idx
     Position i -> toDoc $ "x" ++ show i
-
---computeInterpolation :: Integer -> [Bool] -> [Integer] -> Expression SpatialTerminal
---computeInterpolation order staggering derivatives =
---  if length staggering /= length derivatives
---  then error "computeInterpolation: inconsistent dimension specification"
---  else doDerivatives 0 derivatives interpolated
---    where
---    interpolated = buildLagrange 0 stencilWidths []
---    stencilWidths = stencilWidth <$> zip staggering derivatives
---    stencilWidth (stagger, derivative) = 1 + order + derivative
---    buildLagrange _ [] _ = error "buildLangrange: must be called with at least 1 dimension"
---    buildLagrange dim (width:ws) idx =
---      lagrange variable [(pointPos n, pointValue n) | n <- [0 .. width-1]]
---      where
---      variable = Symbol $ Position dim
---      pointPos n = (Symbol $ SpatialDelta dim) * fromInteger n
---      pointValue n = case ws of
---        [] -> Symbol $ FieldValue idx'
---        _ -> buildLagrange (dim+1) ws idx'
---        where
---        idx' = idx ++ [n]
---    doDerivatives _ [] expr = expr
---    doDerivatives dim (d:ds) expr = doDerivatives (dim + 1) ds expr'
---      where
---      expr' = genericIndex (iterate (diff (Position dim)) expr) d
 
 data FieldAccess = FieldAccess {
   _fieldAccessName :: String,
@@ -271,19 +246,28 @@ buildFieldDictionary _ mesh field = Map.fromList
   num_components = (_meshDimension mesh) ^ (_fieldRank field)
 
 buildMesh :: Parser.FDFL -> Parser.Mesh -> Mesh
-buildMesh fdfl mesh = Mesh
-  { _meshName = Parser.stringLiteralValue $ Parser._meshName mesh
-  , _meshDimension = dimension
-  , _meshFields = (buildField fdfl mesh . Parser.getFieldDef fdfl) <$> (Parser._meshFields mesh)
-  , _meshSolves = (buildSolve fdfl mesh . getSolveDef) <$> (Parser._meshSolves mesh)
-  }
+buildMesh fdfl parserMesh = mesh
   where
-  dimension = Parser._meshDimension mesh
+  meshNoFields = Mesh
+    { _meshName = Parser.stringLiteralValue $ Parser._meshName parserMesh
+    , _meshDimension = dimension
+    , _meshFields = error "buildMesh: fields not yet populated"
+    , _meshSolves = error "buildMesh: solves not yet populated"
+    }
+  meshFields = (buildField meshNoFields fdfl . Parser.getFieldDef fdfl) <$> (Parser._meshFields parserMesh)
+  meshNoSolves = meshNoFields
+    { _meshFields = meshFields
+    }
+  meshSolves = (buildSolve meshNoSolves fdfl . getSolveDef) <$> (Parser._meshSolves parserMesh)
+  mesh = meshNoSolves
+    { _meshSolves = meshSolves
+    }
+  dimension = Parser._meshDimension parserMesh
   getSolveDef ident = case Parser.getSymbol fdfl ident of
     Just (Parser.SolveDef solve) -> solve
     _ -> error $ "buildMesh: unknown solve " ++ Parser.identifierValue ident
 
-buildField :: Parser.FDFL -> Parser.Mesh -> Parser.Field -> Field
+buildField :: Mesh -> Parser.FDFL -> Parser.Field -> Field
 buildField _ _ field = Field
   { _fieldName = Parser.stringLiteralValue $ Parser._fieldName field
   , _fieldRank = Parser._fieldRank field
@@ -292,12 +276,12 @@ buildField _ _ field = Field
   , _fieldStaggerTemporal = False -- TODO: implement me
   }
 
-buildSolve :: Parser.FDFL -> Parser.Mesh -> Parser.Solve -> Solve
-buildSolve fdfl mesh solve = Solve
+buildSolve :: Mesh -> Parser.FDFL -> Parser.Solve -> Solve
+buildSolve mesh fdfl solve = Solve
   { _solveName = Parser.stringLiteralValue $ Parser._solveName solve
   , _solveSpatialOrder = Parser._solveSpatialOrder solve
   , _solveTemporalOrder = temporalOrder
-  , _solveUpdates = (buildUpdate fdfl mesh solve . getExpressionDef) <$> (Parser._solveEquations solve)
+  , _solveUpdates = (buildUpdate mesh fdfl solve . getExpressionDef) <$> (Parser._solveEquations solve)
   }
   where
   temporalOrder = Parser._solveTemporalOrder solve
@@ -330,9 +314,10 @@ makeSemiDiscrete dimension expr = rewritten''
     Function sym@(SemiDiscreteFieldRef _ _ _) _ -> Symbol sym
     _ -> e
 
-buildRHSDiscrete :: Integer -> Expression Terminal -> Expression DiscreteTerminal
-buildRHSDiscrete dimension expr = error $ show $ prettyPrint $ expandSymbols makeDiscrete semiDiscrete
+buildRHSDiscrete :: Mesh ->  Parser.FDFL -> Parser.Solve -> Parser.Equation -> Expression Terminal -> Expression DiscreteTerminal
+buildRHSDiscrete mesh _ _ _ expr = error $ show $ prettyPrint $ expandSymbols makeDiscrete semiDiscrete
   where
+  dimension = _meshDimension mesh
   semiDiscrete = makeSemiDiscrete dimension expr
   makeDiscrete :: SemiDiscreteTerminal -> Expression DiscreteTerminal
   makeDiscrete sym = case sym of
@@ -350,8 +335,8 @@ buildRHSDiscrete dimension expr = error $ show $ prettyPrint $ expandSymbols mak
       stencil = buildStencil stencilSpec
     SemiDiscreteDirection _ -> error "Unexpected SemiDiscreteDirection found (should have been eliminated)."
 
-buildUpdate :: Parser.FDFL -> Parser.Mesh -> Parser.Solve -> Parser.Equation -> Update
-buildUpdate fdfl mesh solve equ = Update
+buildUpdate :: Mesh -> Parser.FDFL -> Parser.Solve -> Parser.Equation -> Update
+buildUpdate mesh fdfl solve equ = Update
   { _updateLHS = lhs
   , _updateRHS = rhs
   , _updateRHSDiscrete = rhsDiscrete
@@ -359,11 +344,11 @@ buildUpdate fdfl mesh solve equ = Update
   }
   where
   getFieldName = Parser.stringLiteralValue . Parser._fieldName
-  dimension = Parser._meshDimension mesh
+  dimension = _meshDimension mesh
   --order = Parser._solveSpatialOrder solve
   lhs = buildLHS $ Parser._fieldUpdateLHS equ
   rhs = buildRHS $ Parser._fieldUpdateRHS equ
-  rhsDiscrete = buildRHSDiscrete dimension <$> (buildRHS $ Parser._fieldUpdateRHS equ)
+  rhsDiscrete = buildRHSDiscrete mesh fdfl solve equ <$> (buildRHS $ Parser._fieldUpdateRHS equ)
   temporalOrder = Parser._solveTemporalOrder solve
   timestepping = case lhs of
     FieldTemporalDerivative _ d -> Map.fromList [(n, buildAdamsBashForth d n) | n <- [1..temporalOrder]]
