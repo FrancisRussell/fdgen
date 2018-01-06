@@ -5,6 +5,7 @@ module FDGEN.Parser ( parseInput, FDFL, getSymbols, Definition(..)
                     , FieldExpr(..), getFieldDef, LiteralConstant(..)
                     , Constant(..), Identifier(..)
                     ) where
+import Data.Char (toLower)
 import Data.Map (Map)
 import Data.Maybe (isJust)
 import Data.List (genericIndex)
@@ -491,7 +492,13 @@ instance FDFLParsable Bool where
   parse = parseBoundedEnum
 
 instance FDFLParsable StaggerStrategy where
-  parse = parseBoundedEnum
+  parse = parserFailEither $ matchWithEnum <$> parseStringLiteral
+    where
+    values = [minBound .. maxBound]
+    mappings = Map.fromList $ (\e -> (toLower <$> show e, e)) <$> values
+    matchWithEnum str = case Map.lookup str mappings of
+      Just value -> Right value
+      Nothing -> Left $ "Invalid staggering strategy: " ++ str
 
 instance FDFLParsable StringLiteral where
   parse = StringLiteral <$> parseStringLiteral

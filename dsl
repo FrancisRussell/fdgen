@@ -1,5 +1,5 @@
-u = Field(name="velocity", rank=1)
-h = Field(name="height", rank=0)
+u = Field(name="velocity", rank=1, spatial_stagger_strategy="dimension")
+h = Field(name="height", rank=0, spatial_stagger_strategy="none")
 nu = Constant(name="nu", rank=1)
 sigma = Constant(name="sigma")
 f = Constant(name="f")
