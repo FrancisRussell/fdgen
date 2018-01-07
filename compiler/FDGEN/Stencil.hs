@@ -19,10 +19,10 @@ data StencilSpec = StencilSpec
   , _stencilSpecStaggering :: [Stagger]
   } deriving Show
 
-
 data Stencil = Stencil
   { _stencilDimension :: Integer
   , _stencilValues :: Map [Integer] Rational
+  , _stencilScalingPowers :: [Integer]
   } deriving Show
 
 data StencilTerminal
@@ -47,7 +47,9 @@ instance PrettyPrintable StencilTerminal
 buildStencil :: StencilSpec -> Stencil
 buildStencil spec = assert (length derivatives == length staggering) result
   where
-  result = expressionToStencil numDimensions interpolatedValue
+  result = (expressionToStencil numDimensions interpolatedValue)
+    { _stencilScalingPowers = negate <$> derivatives
+    }
   derivatives = _stencilSpecDerivatives spec
   staggering = _stencilSpecStaggering spec
   numDimensions = genericLength derivatives
@@ -74,8 +76,8 @@ buildStencil spec = assert (length derivatives == length staggering) result
       extrude position (FieldValue positions) = FieldValue (position:positions)
       extrude _ terminal = terminal
       extrudeExpression position = substSymbols (extrude position)
-      extruded = [((fromInteger i + staggerOffset stagger), extrudeExpression i lowerInterpolation) | i <- (subtract centrePoint) <$> [0..width - 1]]
-      staggerOffset staggering = case staggering of
+      extruded = [((fromInteger i + staggerOffset), extrudeExpression i lowerInterpolation) | i <- (subtract centrePoint) <$> [0..width - 1]]
+      staggerOffset = case stagger of
         StaggerNone -> 0.0
         StaggerPos -> 0.5
         StaggerNeg -> -0.5
@@ -84,6 +86,7 @@ expressionToStencil :: Integer -> Expression StencilTerminal -> Stencil
 expressionToStencil dim expression = Stencil
   { _stencilDimension = dim
   , _stencilValues = coeffMap
+  , _stencilScalingPowers = error "_stencilScalingPowers not yet populated"
   }
   where
   variables = Set.toList $ vars expression
