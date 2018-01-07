@@ -326,7 +326,7 @@ makeSemiDiscrete dimension expr = rewritten''
     Diff (Function (SemiDiscreteFieldRef name tensorIndex derivatives) dims) (SemiDiscreteDirection d) n ->
       Function (SemiDiscreteFieldRef name tensorIndex derivatives') dims
       where
-      derivatives' = (genericTake d derivatives) ++ [n + genericIndex derivatives d] ++ (genericDrop d derivatives)
+      derivatives' = (genericTake d derivatives) ++ [n + genericIndex derivatives d] ++ (genericDrop (d + 1) derivatives)
     _ -> e
   removeFunctions e = case e of
     Function sym@(SemiDiscreteFieldRef _ _ _) _ -> Symbol sym
