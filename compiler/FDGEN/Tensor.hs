@@ -1,7 +1,9 @@
 module FDGEN.Tensor ( Tensor, getElement, setElement, add, sub, inner
                     , outer, dot, pairwiseWithOp, innerWithOp
                     , outerWithOp, dotWithOp, constructTensor
-                    , generateTensor, TensorIndex, divide) where
+                    , generateTensor, TensorIndex, divide, mapWithIndex
+                    , flattenIndex, getShape, TensorShaped(..)
+                    , constructShape) where
 import Control.Applicative ((<$>))
 import Data.Foldable (foldl')
 import Data.List.Split (chunksOf)
@@ -14,6 +16,14 @@ data Tensor e = Tensor
   , _tensorEntries :: [e]
   } deriving Show
 
+data TensorShape
+  = TensorShape Integer Integer
+  deriving (Eq, Ord, Show)
+
+class TensorShaped s where
+  tensorRank :: s -> Integer
+  tensorDim :: s -> Integer
+
 instance PrettyPrintable e => PrettyPrintable (Tensor e)
   where
   toDoc tensor = structureDoc "Tensor"
@@ -24,14 +34,22 @@ instance PrettyPrintable e => PrettyPrintable (Tensor e)
 
 type TensorIndex = [Integer]
 
-numEntries :: Tensor e -> Integer
+instance TensorShaped (Tensor e) where
+  tensorRank = _tensorRank
+  tensorDim = _tensorDim
+
+instance TensorShaped TensorShape where
+  tensorRank (TensorShape _ r) = r
+  tensorDim (TensorShape d _) = d
+
+numEntries :: TensorShaped e => e -> Integer
 numEntries t = (tensorDim t) ^ (tensorRank t)
 
-tensorRank :: Tensor e -> Integer
-tensorRank = _tensorRank
+getShape :: TensorShaped e => e -> TensorShape
+getShape t = TensorShape (tensorDim t) (tensorRank t)
 
-tensorDim :: Tensor e -> Integer
-tensorDim = _tensorDim
+constructShape :: Integer -> Integer -> TensorShape
+constructShape dim rank = TensorShape dim rank
 
 constructTensor :: Integer -> Integer -> [e] -> Tensor e
 constructTensor dim rank entries = if dim < 0
@@ -48,10 +66,19 @@ constructTensor dim rank entries = if dim < 0
 
 instance Functor Tensor where
   fmap f t = Tensor
-    { _tensorDim = _tensorDim t
-    , _tensorRank = _tensorRank t
+    { _tensorDim = tensorDim t
+    , _tensorRank = tensorRank t
     , _tensorEntries = f <$> _tensorEntries t
     }
+
+mapWithIndex :: (TensorIndex -> e -> f) -> Tensor e -> Tensor f
+mapWithIndex f t = Tensor
+    { _tensorDim = tensorDim t
+    , _tensorRank = tensorRank t
+    , _tensorEntries = tensorEntries
+    }
+    where
+    tensorEntries = (uncurry f) <$> zip [unflattenIndex t i | i <- [0..]] (_tensorEntries t)
 
 generateTensor :: Integer -> Integer -> (TensorIndex -> e) -> Tensor e
 generateTensor dim rank gen = genEntry <$> indexTensor
@@ -60,7 +87,7 @@ generateTensor dim rank gen = genEntry <$> indexTensor
   indexTensor = constructTensor dim rank indices
   indices = [0 .. (dim ^ rank - 1)]
 
-unflattenIndex :: Tensor e -> Integer -> TensorIndex
+unflattenIndex :: TensorShaped e => e -> Integer -> TensorIndex
 unflattenIndex t i = if i < 0 || i >= numEntries t
   then error "unflattenIndex: tensor index out of range"
   else index (tensorRank t) i
@@ -71,7 +98,7 @@ unflattenIndex t i = if i < 0 || i >= numEntries t
       else []
       where divisor = dim ^ (rank - 1)
 
-flattenIndex :: Tensor e -> TensorIndex -> Integer
+flattenIndex :: TensorShaped e => e -> TensorIndex -> Integer
 flattenIndex t entries = if (toInteger $ length entries) /= tensorRank t
   then error "flattenIndex: wrong number of entries in index"
   else if (length $ filter (\x -> x < 0 || x >= tensorDim t) entries) /= 0
@@ -92,14 +119,12 @@ setElement t idx value = t { _tensorEntries = updatedEntries }
 getElement :: Tensor e -> TensorIndex -> e
 getElement t idx = genericIndex (_tensorEntries t) (flattenIndex t idx)
 
-sameSize :: Tensor a -> Tensor b -> Bool
-sameSize a b = size a == size b
-  where
-  size t = (tensorRank t, tensorDim t)
+sameShape :: Tensor a -> Tensor b -> Bool
+sameShape a b = getShape a == getShape b
 
 pairwiseWithOp :: (a -> b -> c) -> Tensor a -> Tensor b -> Tensor c
-pairwiseWithOp f a b = if not $ sameSize a b
-  then error "pairwiseWithOp: both operands must be same size"
+pairwiseWithOp f a b = if not $ sameShape a b
+  then error "pairwiseWithOp: both operands must be same shape"
   else constructTensor (tensorDim a) (tensorRank a) entries
     where
     entries = zipWith f (_tensorEntries a) (_tensorEntries b)
@@ -131,8 +156,8 @@ outer :: Num a => Tensor a -> Tensor a -> Tensor a
 outer = outerWithOp (*)
 
 innerWithOp :: (a -> b -> c) -> (c -> c -> c) -> Tensor a -> Tensor b -> Tensor c
-innerWithOp mul combine a b = if not $ sameSize a b
-  then error "innerWithOp: both operands must be same size"
+innerWithOp mul combine a b = if not $ sameShape a b
+  then error "innerWithOp: both operands must be same shape"
   else constructTensor (tensorDim a) 0 [summed]
     where
     toSum = zipWith mul (_tensorEntries a) (_tensorEntries b)

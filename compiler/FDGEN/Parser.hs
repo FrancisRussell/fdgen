@@ -3,7 +3,7 @@ module FDGEN.Parser ( parseInput, FDFL, getSymbols, Definition(..)
                     , Mesh(..), stringLiteralValue, identifierValue
                     , getSymbol, Field(..), Solve(..), Equation(..)
                     , FieldExpr(..), getFieldDef, LiteralConstant(..)
-                    , Constant(..), Identifier(..)
+                    , Constant(..), Identifier(..), StaggerStrategy(..)
                     ) where
 import Data.Char (toLower)
 import Data.Map (Map)

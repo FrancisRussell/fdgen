@@ -2,10 +2,11 @@ module FDGEN.Discrete (buildDiscreteForm, buildTemplateDictionary) where
 import FDGEN.Algebra (Expression(..), diff, adamsBashforthGeneral, expandSymbols, substSymbols, rewriteFixedPoint)
 import FDGEN.Tensor (Tensor, TensorIndex)
 import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, vListDoc)
-import FDGEN.Stencil (StencilSpec(..), Stencil(..), buildStencil)
+import FDGEN.Stencil (StencilSpec(..), Stencil(..), buildStencil, Stagger(..))
 import Control.Applicative ((<$>))
+import Control.Exception (assert)
 import Data.Maybe (catMaybes)
-import Data.List (genericIndex, genericTake, genericDrop)
+import Data.List (genericIndex, genericTake, genericDrop, genericReplicate)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified FDGEN.Parser as Parser
@@ -142,7 +143,7 @@ data Field = Field
   { _fieldName :: String
   , _fieldRank :: Integer
   , _fieldSymmetric :: Bool
-  , _fieldStaggerSpatial :: [Bool]
+  , _fieldStaggerSpatial :: [[Bool]]
   , _fieldStaggerTemporal :: Bool
 } deriving Show
 
@@ -152,7 +153,7 @@ instance PrettyPrintable Field
     [ ("name", toDoc $ _fieldName field)
     , ("rank", toDoc $ _fieldRank field)
     , ("symmetric", toDoc $ _fieldSymmetric field)
-    , ("spatial_staggering", hListDoc $ _fieldStaggerSpatial field)
+    , ("spatial_staggering", hListDoc $ hListDoc <$> _fieldStaggerSpatial field)
     , ("temporal_staggering", toDoc $ _fieldStaggerTemporal field)
     ]
 
@@ -268,13 +269,30 @@ buildMesh fdfl parserMesh = mesh
     _ -> error $ "buildMesh: unknown solve " ++ Parser.identifierValue ident
 
 buildField :: Mesh -> Parser.FDFL -> Parser.Field -> Field
-buildField _ _ field = Field
-  { _fieldName = Parser.stringLiteralValue $ Parser._fieldName field
-  , _fieldRank = Parser._fieldRank field
+buildField mesh _ field = Field
+  { _fieldName = name
+  , _fieldRank = rank
   , _fieldSymmetric = Parser._fieldSymmetric field
-  , _fieldStaggerSpatial = [] -- TODO: implement me
+  , _fieldStaggerSpatial = staggering
   , _fieldStaggerTemporal = False -- TODO: implement me
   }
+  where
+  name = Parser.stringLiteralValue $ Parser._fieldName field
+  rank = Parser._fieldRank field
+  dimension = _meshDimension mesh
+  numElements = dimension ^ rank
+  staggering = case Parser._fieldStaggerStrategySpatial field of
+    Parser.None -> genericReplicate numElements $ genericReplicate dimension False
+    Parser.All -> genericReplicate numElements $ genericReplicate dimension True
+    Parser.Dimension -> case rank of
+      1 -> [genericReplicate n False ++ [True] ++ genericReplicate (dimension-1-n) False | n <- [0..dimension-1]]
+      _ -> error $ "Dimension staggering strategy is only defined for rank 1 tensors (" ++ name ++ ")."
+
+meshGetField :: Mesh -> String -> Field
+meshGetField mesh name = case filter (\f -> _fieldName f == name) (_meshFields mesh) of
+  [] -> error $ "Unknown field " ++ name
+  [f] -> f
+  _ -> error $ "Multiple definitions of " ++ name
 
 buildSolve :: Mesh -> Parser.FDFL -> Parser.Solve -> Solve
 buildSolve mesh fdfl solve = Solve
@@ -302,7 +320,7 @@ makeSemiDiscrete dimension expr = rewritten''
   rewritten'' = rewriteFixedPoint removeFunctions rewritten'
   rewriteTerminal t = case t of
     ConstantRef name tensorIndex -> SemiDiscreteConstantRef name tensorIndex
-    FieldRef name tensorIndex -> SemiDiscreteFieldRef name tensorIndex (genericTake dimension $ repeat 0)
+    FieldRef name tensorIndex -> SemiDiscreteFieldRef name tensorIndex (genericReplicate dimension 0)
     Direction i -> SemiDiscreteDirection i
   collapseDerivative e = case e of
     Diff (Function (SemiDiscreteFieldRef name tensorIndex derivatives) dims) (SemiDiscreteDirection d) n ->
@@ -314,26 +332,50 @@ makeSemiDiscrete dimension expr = rewritten''
     Function sym@(SemiDiscreteFieldRef _ _ _) _ -> Symbol sym
     _ -> e
 
-buildRHSDiscrete :: Mesh ->  Parser.FDFL -> Parser.Solve -> Parser.Equation -> Expression Terminal -> Expression DiscreteTerminal
-buildRHSDiscrete mesh _ _ _ expr = error $ show $ prettyPrint $ expandSymbols makeDiscrete semiDiscrete
+buildRHSDiscrete :: Mesh -> Parser.FDFL -> Parser.Solve -> Parser.Equation ->
+                    FieldTemporalDerivative -> Tensor(Expression Terminal) -> Tensor(Expression DiscreteTerminal)
+buildRHSDiscrete mesh _ solve _ lhs rhsContinuous = rhs
   where
   dimension = _meshDimension mesh
-  semiDiscrete = makeSemiDiscrete dimension expr
-  makeDiscrete :: SemiDiscreteTerminal -> Expression DiscreteTerminal
-  makeDiscrete sym = case sym of
-    SemiDiscreteConstantRef name tensorIndex -> Symbol $ ConstantDataRef name tensorIndex
-    SemiDiscreteFieldRef name tensorIndex derivatives -> stencilExpression
-      where
-      stencilExpression = foldl (+) 0 terms
-      terms = buildTerm <$> Map.toList (_stencilValues stencil)
-      buildTerm (index, coeff) = (fromRational coeff) * (Symbol $ FieldDataRef name tensorIndex index)
-      stencilSpec = StencilSpec
-        { _stencilSpecOrder = error "unknown order"
-        , _stencilSpecDerivatives = derivatives
-        , _stencilSpecStaggering = error "unknown staggering"
-        }
-      stencil = buildStencil stencilSpec
-    SemiDiscreteDirection _ -> error "Unexpected SemiDiscreteDirection found (should have been eliminated)."
+  order = Parser._solveSpatialOrder solve
+  shape = Tensor.getShape rhsContinuous
+  rhs = Tensor.mapWithIndex makeDiscrete rhsContinuous
+  lhsFieldName = case lhs of
+    FieldTemporalDerivative name _ -> name
+  makeDiscrete :: TensorIndex -> Expression Terminal -> Expression DiscreteTerminal
+  makeDiscrete idx expr = discrete
+    where
+    lhsStaggering = (_fieldStaggerSpatial $ meshGetField mesh lhsFieldName) `genericIndex` (Tensor.flattenIndex shape idx)
+    semiDiscrete = makeSemiDiscrete dimension expr
+    discrete = expandSymbols expandStencilSymbol semiDiscrete
+    expandStencilSymbol :: SemiDiscreteTerminal -> Expression DiscreteTerminal
+    expandStencilSymbol sym = case sym of
+      SemiDiscreteConstantRef name tensorIndex -> Symbol $ ConstantDataRef name tensorIndex
+      SemiDiscreteFieldRef name tensorIndex derivatives -> stencilExpression
+        where
+        field = meshGetField mesh name
+        fieldRank = _fieldRank field
+        fieldShape = Tensor.constructShape dimension fieldRank
+        fieldStaggering = (_fieldStaggerSpatial field) `genericIndex` (Tensor.flattenIndex fieldShape tensorIndex)
+        relativeStaggering = computeStaggering lhsStaggering fieldStaggering
+        stencilExpression = foldl (+) 0 terms
+        terms = buildTerm <$> Map.toList (_stencilValues stencil)
+        buildTerm (index, coeff) = (fromRational coeff) * (Symbol $ FieldDataRef name tensorIndex index)
+        stencilSpec = StencilSpec
+          { _stencilSpecOrder = order
+          , _stencilSpecDerivatives = derivatives
+          , _stencilSpecStaggering = relativeStaggering
+          }
+        stencil = buildStencil stencilSpec
+      SemiDiscreteDirection _ -> error "Unexpected SemiDiscreteDirection found (should have been eliminated)."
+
+computeStaggering :: [Bool] -> [Bool] -> [Stagger]
+computeStaggering first second = assert (length first == length second) computeStagger <$> zip first second
+  where
+  computeStagger pair = case pair of
+    (False, True) -> StaggerPos
+    (True, False) -> StaggerNeg
+    _ -> StaggerNone
 
 buildUpdate :: Mesh -> Parser.FDFL -> Parser.Solve -> Parser.Equation -> Update
 buildUpdate mesh fdfl solve equ = Update
@@ -345,18 +387,12 @@ buildUpdate mesh fdfl solve equ = Update
   where
   getFieldName = Parser.stringLiteralValue . Parser._fieldName
   dimension = _meshDimension mesh
-  --order = Parser._solveSpatialOrder solve
   lhs = buildLHS $ Parser._fieldUpdateLHS equ
   rhs = buildRHS $ Parser._fieldUpdateRHS equ
-  rhsDiscrete = buildRHSDiscrete mesh fdfl solve equ <$> (buildRHS $ Parser._fieldUpdateRHS equ)
+  rhsDiscrete = buildRHSDiscrete mesh fdfl solve equ lhs rhs
   temporalOrder = Parser._solveTemporalOrder solve
   timestepping = case lhs of
     FieldTemporalDerivative _ d -> Map.fromList [(n, buildAdamsBashForth d n) | n <- [1..temporalOrder]]
---  interpolation derivatives = Interpolation
---    { _interpolationOrder = order
---    , _interpolationDerivatives = derivatives
---    , _interpolationExpression = (computeInterpolation order (genericTake dimension $ repeat False) derivatives)
---    }
   buildLHS expr = buildDerivative 0 expr
     where
     buildDerivative n (Parser.FieldTemporalDerivative subExpr) = buildDerivative (n + 1) subExpr
