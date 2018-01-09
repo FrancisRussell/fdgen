@@ -1,0 +1,5 @@
+u = Field(name="heat", rank=0, spatial_stagger_strategy="none")
+alpha = Constant(name="alpha", rank=0)
+heat_eq = Equation(Dt(u), - alpha * div(grad(u)))
+step = Solve(name="step", spatial_order=1, temporal_order=1, equations=[heat_eq])
+m = Mesh(name="HeatSolver", dimension=2, fields=[u], solves=[step])
