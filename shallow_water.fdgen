@@ -2,9 +2,10 @@ u = Field(name="velocity", rank=1, spatial_stagger_strategy="dimension")
 h = Field(name="height", rank=0, spatial_stagger_strategy="none")
 nu = Constant(name="nu")
 g = Constant(name="g")
+H = Constant(name="h0")
 
 VelocityEq = Equation(Dt(u), nu * div(grad(u)) - dot(grad(u), u) - g * grad(h))
-HeightEq = Equation(Dt(h), -div(h * u))
+HeightEq = Equation(Dt(h), -div((h + H) * u))
 TimeStep = Solve(name="step", spatial_order=1, temporal_order=3, equations=[VelocityEq, HeightEq])
 
 m = Mesh(name="shallow_water", dimension=2, fields=[u, h], solves=[TimeStep])
