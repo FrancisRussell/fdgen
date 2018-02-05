@@ -65,13 +65,12 @@ buildStencil spec = assert (length derivatives == length staggering) result
   differentiatedInterpolation = foldl (\expr (dim, power) -> diff' (Position dim) power expr) interpolation (zip [0..numDimensions-1] derivatives)
   interpolatedValue = foldl (\expr (from, to) -> subst from to expr) differentiatedInterpolation originSubstitutions
   buildInterpolation :: [(Integer, Integer, Stagger)] -> Expression StencilTerminal
-  buildInterpolation = buildInterpolation' . reverse
+  buildInterpolation = buildInterpolation' 0
     where
-    buildInterpolation' [] = Symbol $ FieldValue []
-    buildInterpolation' ((width, centrePoint, stagger):widths) = lagrange (Symbol $ Position dimension) extruded
+    buildInterpolation' _ [] = Symbol $ FieldValue []
+    buildInterpolation' dimension ((width, centrePoint, stagger):widths) = lagrange (Symbol $ Position dimension) extruded
       where
-      dimension = 0 + genericLength widths
-      lowerInterpolation = buildInterpolation' widths
+      lowerInterpolation = buildInterpolation' (dimension + 1) widths
       extrude :: Integer -> StencilTerminal -> StencilTerminal
       extrude position (FieldValue positions) = FieldValue (position:positions)
       extrude _ terminal = terminal
