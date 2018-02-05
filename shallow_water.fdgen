@@ -1,13 +1,9 @@
 u = Field(name="velocity", rank=1, spatial_stagger_strategy="dimension")
 h = Field(name="height", rank=0, spatial_stagger_strategy="none")
-nu = Constant(name="nu", rank=1)
-sigma = Constant(name="sigma")
-f = Constant(name="f")
+nu = Constant(name="nu")
 g = Constant(name="g")
-tau = Constant(name="tau", rank=1)
-e = Permutation()
 
-VelocityEq = Equation(Dt(u), -g * grad(h) + dot(u, grad(u)) + f * dot(e, u) + nu)
+VelocityEq = Equation(Dt(u), nu * div(grad(u)) - dot(grad(u), u) - g * grad(h))
 HeightEq = Equation(Dt(h), -div(h * u))
 TimeStep = Solve(name="step", spatial_order=1, temporal_order=3, equations=[VelocityEq, HeightEq])
 
