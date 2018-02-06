@@ -4,7 +4,7 @@ nu = Constant(name="nu")
 g = Constant(name="g")
 H = Constant(name="h0")
 
-VelocityEq = Equation(Dt(u), nu * div(grad(u)) - dot(grad(u), u) - g * grad(h))
+VelocityEq = Equation(Dt(u), nu * div(grad(u)) - dot(u, grad(u)) - g * grad(h))
 HeightEq = Equation(Dt(h), -div((h + H) * u))
 TimeStep = Solve(name="step", spatial_order=1, temporal_order=3, equations=[VelocityEq, HeightEq])
 
