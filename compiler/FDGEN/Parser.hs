@@ -14,7 +14,7 @@ import Control.Monad ((>=>))
 import Text.Parsec.Char (letter, spaces)
 import Text.Parsec.Combinator (eof, choice, optionMaybe)
 import Text.Parsec.Language (emptyDef, LanguageDef)
-import Text.Parsec (ParsecT, ParseError, runParser, getState, Parsec, putState)
+import Text.Parsec (ParsecT, ParseError, runParser, getState, Parsec, putState, try)
 import Text.Parsec.Prim (many, parserFail)
 import Text.Parsec.Expr (buildExpressionParser, Operator(..), Assoc(..))
 import Text.Parsec.Token (GenTokenParser(..), GenLanguageDef(..), makeTokenParser)
@@ -510,9 +510,11 @@ instance FDFLParsable Integer where
   parse = parseInteger
 
 instance FDFLParsable LiteralConstant where
-  parse = choice [ parseNullary "Permutation" PermutationSymbol
-          , ScalarConstant <$> parseFloat
-          ]
+  parse = choice
+    [ parseNullary "Permutation" PermutationSymbol
+    , ScalarConstant <$> try parseFloat
+    , ScalarConstant <$> (fromIntegral <$> parseInteger)
+    ]
     where
     parseNullary name constructor =
       parseReserved name >> const constructor <$> parseParens spaces
