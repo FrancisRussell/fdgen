@@ -402,6 +402,7 @@ buildUpdate mesh fdfl solve equ = Update
   buildRHS :: Parser.FieldExpr Parser.Identifier -> Tensor (Expression Terminal)
   buildRHS expr = case expr of
     Parser.FieldTemporalDerivative _ -> error "buildUpdate: Temporal derivative not expected in RHS"
+    Parser.FieldNormalDerivative _ -> error "buildUpdate: Normal derivative not expected in RHS"
     Parser.FieldAddition l r -> Tensor.add (buildRHS l) (buildRHS r)
     Parser.FieldInner l r -> Tensor.inner (buildRHS l) (buildRHS r)
     Parser.FieldOuter l r -> Tensor.outer (buildRHS l) (buildRHS r)

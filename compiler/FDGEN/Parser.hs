@@ -88,6 +88,7 @@ data FieldExpr a
   | FieldDivergence (FieldExpr a)
   | FieldSpatialDerivative (FieldExpr a) Integer
   | FieldTemporalDerivative (FieldExpr a)
+  | FieldNormalDerivative (FieldExpr a)
   deriving Show
 
 instance PrettyPrintable a => PrettyPrintable (FieldExpr a)
@@ -103,6 +104,7 @@ instance PrettyPrintable a => PrettyPrintable (FieldExpr a)
     FieldDivergence a -> function "div" [a]
     FieldSpatialDerivative a i -> function "diff" [toDoc a, dim i]
     FieldTemporalDerivative a -> function "dt" [a]
+    FieldNormalDerivative a -> function "dn" [a]
     FieldLiteral (ScalarConstant r) -> PrettyPrint.double r
     FieldLiteral PermutationSymbol -> text "epsilon"
     where
@@ -145,11 +147,25 @@ instance PrettyPrintable Equation
    , ("rhs", toDoc $ _fieldUpdateRHS equ)
    ]
 
+data BoundaryCondition = BoundaryCondition {
+  _bcLHS :: FieldExpr Identifier,
+  _bcRHS :: FieldExpr Identifier,
+  _bcSubdomains :: [StringLiteral]
+} deriving Show
+
+instance PrettyPrintable BoundaryCondition
+ where
+ toDoc bc = structureDoc "BoundaryCondition"
+   [ ("lhs", toDoc $ _bcLHS bc)
+   , ("rhs", toDoc $ _bcRHS bc)
+   ]
+
 data Solve = Solve {
   _solveName :: StringLiteral,
   _solveSpatialOrder :: Integer,
   _solveTemporalOrder :: Integer,
-  _solveEquations :: [Identifier]
+  _solveEquations :: [Identifier],
+  _solveBoundaryConditions :: [Identifier]
 } deriving Show
 
 instance PrettyPrintable Solve
@@ -159,12 +175,14 @@ instance PrettyPrintable Solve
    , ("spatial_order", toDoc $ _solveSpatialOrder solve)
    , ("temporal_order", toDoc $ _solveTemporalOrder solve)
    , ("equations", hListDoc $ _solveEquations solve)
+   , ("boundary_conditions", hListDoc $ _solveBoundaryConditions solve)
    ]
 
 data Definition
  = FieldDef Field
  | MeshDef Mesh
  | EquationDef Equation
+ | BoundaryConditionDef BoundaryCondition
  | ConstantDef Constant
  | FieldExprDef (FieldExpr Identifier)
  | SolveDef Solve
@@ -176,6 +194,7 @@ instance PrettyPrintable Definition
    FieldDef f -> toDoc f
    MeshDef m -> toDoc m
    EquationDef e -> toDoc e
+   BoundaryConditionDef bc -> toDoc bc
    ConstantDef c -> toDoc c
    FieldExprDef f -> toDoc  f
    SolveDef s -> toDoc s
@@ -210,6 +229,7 @@ Lens.makeLenses ''Field
 Lens.makeLenses ''Equation
 Lens.makeLenses ''Constant
 Lens.makeLenses ''Solve
+Lens.makeLenses ''BoundaryCondition
 
 emptyFDFL :: FDFL
 emptyFDFL = FDFL {
@@ -296,6 +316,11 @@ isEquation = validateDefinition validate "equation"
   where validate def = case def of
                          EquationDef _ -> True
                          _ -> False
+isBoundaryCondition :: Validator Identifier
+isBoundaryCondition = validateDefinition validate "boundary condition"
+  where validate def = case def of
+                         BoundaryConditionDef _ -> True
+                         _ -> False
 
 parseKeywordParam :: FDFLParsable a => String -> Validator a
   -> Lens.Setter' s a -> FDFLParser (AttributeUpdate s)
@@ -332,6 +357,14 @@ parseEquation = ObjectParseSpec "Equation"
   ]
   []
 
+parseBoundaryCondition :: ObjectParseSpec BoundaryCondition
+parseBoundaryCondition = ObjectParseSpec "BoundaryCondition"
+  [ buildPositionalSpec "lhs" alwaysValid bcLHS
+  , buildPositionalSpec "rhs" alwaysValid bcRHS
+  ]
+  [ buildAttributeSpec "subdomains" False alwaysValid bcSubdomains
+  ]
+
 parseConstant :: ObjectParseSpec Constant
 parseConstant = ObjectParseSpec "Constant"
   []
@@ -346,6 +379,7 @@ parseSolve = ObjectParseSpec "Solve"
   , buildAttributeSpec "spatial_order" False alwaysValid solveSpatialOrder
   , buildAttributeSpec "temporal_order" False alwaysValid solveTemporalOrder
   , buildAttributeSpec "equations" False (validateList isEquation >=> noDuplicates) solveEquations
+  , buildAttributeSpec "boundary_conditions" False (validateList isBoundaryCondition >=> noDuplicates) solveBoundaryConditions
   ]
 
 validateAttributes :: [AttributeSpec s] -> [AttributeUpdate s]
@@ -420,6 +454,14 @@ instance FDFLObject Equation where
     , _fieldUpdateRHS = error "undefined fieldUpdateRHS"
     }
 
+instance FDFLObject BoundaryCondition where
+  wrapObject = BoundaryConditionDef
+  emptyObject = BoundaryCondition
+    { _bcLHS = error "undefined bcLHS"
+    , _bcRHS = error "undefined bcRHS"
+    , _bcSubdomains = error "undefined bcSubdomains"
+    }
+
 instance FDFLObject Constant where
   wrapObject = ConstantDef
   emptyObject = Constant
@@ -434,6 +476,7 @@ instance FDFLObject Solve where
     , _solveSpatialOrder = 1
     , _solveTemporalOrder = 1
     , _solveEquations = []
+    , _solveBoundaryConditions = []
     }
 
 class FDFLParsable a where
@@ -451,6 +494,7 @@ instance FDFLParsable (FieldExpr Identifier) where
       , parseUnary "div" FieldDivergence
       , parseUnary "laplace" (FieldDivergence . FieldGradient)
       , parseUnary "Dt" FieldTemporalDerivative
+      , parseUnary "Dn" FieldNormalDerivative
       , parseBinary "inner" FieldInner
       , parseBinary "outer" FieldOuter
       , parseBinary "dot" FieldDot
@@ -587,6 +631,7 @@ parseDefinition = choice
   [ parseSpecToParser parseField
   , parseSpecToParser parseMesh
   , parseSpecToParser parseEquation
+  , parseSpecToParser parseBoundaryCondition
   , parseSpecToParser parseConstant
   , parseSpecToParser parseSolve
   , FieldExprDef <$> parse
