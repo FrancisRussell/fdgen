@@ -1,0 +1,8 @@
+- Enable references to tensor elements (needed for boundary conditions).
+- Add functionality to partition tensor-valued fields into scalar-valued 
+  ones.
+- Add output support for Jamie's DSL.
+- Add syntax for declaring true constant valued mesh sizes, 
+  scalars and (maybe) tensors.
+- Add folding support for constant values.
+- Support constant division -> multiply conversion. 
