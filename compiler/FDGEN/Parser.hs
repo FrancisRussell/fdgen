@@ -89,6 +89,7 @@ data FieldExpr a
   | FieldSpatialDerivative (FieldExpr a) Integer
   | FieldTemporalDerivative (FieldExpr a)
   | FieldNormalDerivative (FieldExpr a)
+  | FieldIndexOperation [Integer] (FieldExpr a)
   deriving Show
 
 instance PrettyPrintable a => PrettyPrintable (FieldExpr a)
@@ -107,6 +108,7 @@ instance PrettyPrintable a => PrettyPrintable (FieldExpr a)
     FieldNormalDerivative a -> function "dn" [a]
     FieldLiteral (ScalarConstant r) -> PrettyPrint.double r
     FieldLiteral PermutationSymbol -> text "epsilon"
+    FieldIndexOperation indices a -> hcat [toDoc a , hListDoc indices]
     where
       text = PrettyPrint.text
       hcat = PrettyPrint.hcat
@@ -519,7 +521,8 @@ instance FDFLParsable (FieldExpr Identifier) where
       second <- parse
       return (first, second)
     table =
-      [ [ Prefix $ parseSymbol "-" >> return negate' ]
+      [ [ Postfix (FieldIndexOperation <$> parseIndices) ]
+      , [ Prefix $ parseSymbol "-" >> return negate' ]
       , [ Infix (parseSymbol "*" >> return FieldOuter) AssocLeft
         , Infix (parseSymbol "/" >> return FieldDivision) AssocLeft
         ]
@@ -528,6 +531,7 @@ instance FDFLParsable (FieldExpr Identifier) where
         ]
       ]
     negate' = FieldOuter . FieldLiteral . ScalarConstant $ -1.0
+    parseIndices = parseBrackets $ parseCommaSep parseInteger
 
 parseBoundedEnum :: (Show a, Enum a, Bounded a) => FDFLParser a
 parseBoundedEnum = choice $ toParser <$> values
