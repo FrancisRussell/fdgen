@@ -219,10 +219,6 @@ instance PrettyPrintable FieldLValue
    [] -> toDoc name
    _ -> PrettyPrint.hcat [toDoc name, hListDoc indices]
 
-data FieldBoundaryCondition
-  = FieldBoundaryCondition BoundaryConditionType String
-  deriving (Eq, Ord, Show)
-
 data FieldTemporalDerivative
   = FieldTemporalDerivative FieldLValue Integer
   deriving (Eq, Ord, Show)
@@ -255,7 +251,7 @@ instance PrettyPrintable Update
 
 data BoundaryCondition = BoundaryCondition
   { _bcType :: BoundaryConditionType
-  , _bcField :: String
+  , _bcField :: FieldLValue
   , _bcRHS :: Tensor (Expression Terminal)
   , _bcSubdomains :: [EdgeDomain]
   } deriving Show
@@ -354,9 +350,8 @@ buildBoundaryCondition mesh fdfl _solve bc = BoundaryCondition
   where
   (bcType, bcField) = buildLHS $ Parser._bcLHS bc
   getFieldName ident = Parser.stringLiteralValue . Parser._fieldName $ Parser.getFieldDef fdfl ident
-  buildLHS (Parser.FieldRef ident) = (Dirichlet, getFieldName ident)
-  buildLHS (Parser.FieldNormalDerivative (Parser.FieldRef ident)) = (Neumann, getFieldName ident)
-  buildLHS expr = error $ "Unexpected boundary condition LHS: " ++ show expr
+  buildLHS (Parser.FieldNormalDerivative lValue) = (Neumann, findLValue mesh fdfl lValue)
+  buildLHS lValue = (Dirichlet, findLValue mesh fdfl lValue)
   bcSubdomains = case Parser._bcSubdomains bc of
     Nothing -> [AllExteriorEdges]
     Just domains -> (TaggedEdgeString . Parser.stringLiteralValue) <$> domains
