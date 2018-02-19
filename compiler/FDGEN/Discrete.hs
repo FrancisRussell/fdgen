@@ -6,7 +6,7 @@ import FDGEN.Stencil (StencilSpec(..), Stencil(..), buildStencil, Stagger(..))
 import Control.Applicative ((<$>))
 import Control.Exception (assert)
 import Data.Maybe (catMaybes)
-import Data.List (genericIndex, genericTake, genericDrop, genericReplicate)
+import Data.List (genericIndex, genericTake, genericDrop, genericReplicate, genericLength)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified FDGEN.Parser as Parser
@@ -209,21 +209,29 @@ instance PrettyPrintable BoundaryConditionType
     Dirichlet -> "Dirichlet"
     Neumann -> "Neumann"
 
+data FieldLValue
+  = FieldLValue String [Integer]
+  deriving (Eq, Ord, Show)
+
+instance PrettyPrintable FieldLValue
+  where
+  toDoc (FieldLValue name indices) = case indices of
+   [] -> toDoc name
+   _ -> PrettyPrint.hcat [toDoc name, hListDoc indices]
+
 data FieldBoundaryCondition
   = FieldBoundaryCondition BoundaryConditionType String
   deriving (Eq, Ord, Show)
 
 data FieldTemporalDerivative
-  = FieldTemporalDerivative String Integer
+  = FieldTemporalDerivative FieldLValue Integer
   deriving (Eq, Ord, Show)
 
 instance PrettyPrintable FieldTemporalDerivative
   where
   toDoc (FieldTemporalDerivative f i) = if i /= 0
-    then PrettyPrint.hcat $ toDoc <$> ["(d^", i', " * ", f, ")/dt^", i']
+    then PrettyPrint.hcat [toDoc "(d^", toDoc i, toDoc " * ", toDoc f, toDoc ")/dt^", toDoc i]
     else toDoc f
-    where
-    i' = show i
 
 data Update = Update
   { _updateLHS :: FieldTemporalDerivative
@@ -404,7 +412,7 @@ buildRHSDiscrete mesh _ solve _ lhs rhsContinuous = rhs
   shape = Tensor.getShape rhsContinuous
   rhs = Tensor.mapWithIndex makeDiscrete rhsContinuous
   lhsFieldName = case lhs of
-    FieldTemporalDerivative name _ -> name
+    FieldTemporalDerivative (FieldLValue name _) _ -> name
   makeDiscrete :: TensorIndex -> Expression Terminal -> Expression DiscreteTerminal
   makeDiscrete idx expr = discrete
     where
@@ -497,6 +505,17 @@ buildTensorRValue mesh fdfl expr = case expr of
   directions = Symbol . Direction <$> [0 .. dimension -1]
 
 
+findLValue :: Mesh -> Parser.FDFL -> Parser.FieldExpr Parser.Identifier -> FieldLValue
+findLValue mesh fdfl expr = case expr of
+  Parser.FieldRef ident -> FieldLValue (getFieldName ident) []
+  Parser.FieldIndexOperation indices (Parser.FieldRef ident) -> if genericLength indices == getFieldRank ident
+    then FieldLValue (getFieldName ident) indices
+    else error $ "All indices must be specified in tensor assignment: " ++ show expr
+  _ -> error $ "Unhandled L-value expression type for field assignment: " ++ show expr
+  where
+  getFieldName = Parser.stringLiteralValue . Parser._fieldName . Parser.getFieldDef fdfl
+  getFieldRank = _fieldRank . meshGetField mesh . getFieldName
+
 buildUpdate :: Mesh -> Parser.FDFL -> Parser.Solve -> Parser.Equation -> Update
 buildUpdate mesh fdfl solve equ = Update
   { _updateLHS = lhs
@@ -505,7 +524,6 @@ buildUpdate mesh fdfl solve equ = Update
   , _updateTimeSteppingSchemes = timestepping
   }
   where
-  getFieldName = Parser.stringLiteralValue . Parser._fieldName
   lhs = buildLHS $ Parser._fieldUpdateLHS equ
   rhs = buildTensorRValue mesh fdfl $ Parser._fieldUpdateRHS equ
   rhsDiscrete = buildRHSDiscrete mesh fdfl solve equ lhs rhs
@@ -515,5 +533,4 @@ buildUpdate mesh fdfl solve equ = Update
   buildLHS expr = buildDerivative 0 expr
     where
     buildDerivative n (Parser.FieldTemporalDerivative subExpr) = buildDerivative (n + 1) subExpr
-    buildDerivative n (Parser.FieldRef ident) = FieldTemporalDerivative (getFieldName $ Parser.getFieldDef fdfl ident) n
-    buildDerivative _ _ = error $ "Unsupported LHS: " ++ show expr
+    buildDerivative n lValue = FieldTemporalDerivative (findLValue mesh fdfl lValue) n
