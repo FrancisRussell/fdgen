@@ -162,6 +162,7 @@ data Solve = Solve
   , _solveSpatialOrder :: Integer
   , _solveTemporalOrder :: Integer
   , _solveUpdates :: [Update]
+  , _solveBoundaryConditions :: [BoundaryCondition]
 } deriving Show
 
 instance PrettyPrintable Solve
@@ -171,6 +172,7 @@ instance PrettyPrintable Solve
     , ("spatial_order", toDoc $ _solveSpatialOrder solve)
     , ("temporal_order", toDoc $ _solveTemporalOrder solve)
     , ("updates", vListDoc $ _solveUpdates solve)
+    , ("boundary_conditions", vListDoc $ _solveBoundaryConditions solve)
     ]
 
 data Interpolation = Interpolation
@@ -186,6 +188,30 @@ instance PrettyPrintable Interpolation
     , ("derivatives", toDoc . show $ _interpolationDerivatives interp)
     , ("expression", toDoc $ _interpolationExpression interp)
     ]
+
+data BoundaryConditionType
+  = Dirichlet
+  | Neumann
+  deriving (Eq, Ord, Show)
+
+data EdgeDomain
+  = AllExteriorEdges
+  | TaggedEdgeString String
+  deriving (Eq, Ord, Show)
+
+instance PrettyPrintable EdgeDomain
+  where
+  toDoc = toDoc . show
+
+instance PrettyPrintable BoundaryConditionType
+  where
+  toDoc ty = toDoc $ case ty of
+    Dirichlet -> "Dirichlet"
+    Neumann -> "Neumann"
+
+data FieldBoundaryCondition
+  = FieldBoundaryCondition BoundaryConditionType String
+  deriving (Eq, Ord, Show)
 
 data FieldTemporalDerivative
   = FieldTemporalDerivative String Integer
@@ -218,6 +244,22 @@ instance PrettyPrintable Update
     schemesDoc = structureDoc "Map" schemeEntries
     schemeEntries = transformEntry <$> Map.assocs (_updateTimeSteppingSchemes update)
     transformEntry (order, expr) = (show order, toDoc expr)
+
+data BoundaryCondition = BoundaryCondition
+  { _bcType :: BoundaryConditionType
+  , _bcField :: String
+  , _bcRHS :: Tensor (Expression Terminal)
+  , _bcSubdomains :: [EdgeDomain]
+  } deriving Show
+
+instance PrettyPrintable BoundaryCondition
+  where
+  toDoc bc = structureDoc "BoundaryCondition"
+    [ ("type", toDoc $ _bcType bc)
+    , ("field", toDoc $ _bcField bc)
+    , ("rhs", toDoc $ _bcRHS bc)
+    , ("subdomains", vListDoc $ _bcSubdomains bc)
+    ]
 
 buildDiscreteForm :: Parser.FDFL -> Discretised
 buildDiscreteForm fdfl = Discretised { _discretisedMeshes = catMaybes maybeMeshes }
@@ -294,18 +336,39 @@ meshGetField mesh name = case filter (\f -> _fieldName f == name) (_meshFields m
   [f] -> f
   _ -> error $ "Multiple definitions of " ++ name
 
+buildBoundaryCondition :: Mesh -> Parser.FDFL -> Parser.Solve -> Parser.BoundaryCondition -> BoundaryCondition
+buildBoundaryCondition mesh fdfl _solve bc = BoundaryCondition
+  { _bcType = bcType
+  , _bcField = bcField
+  , _bcRHS = buildTensorRValue mesh fdfl $ Parser._bcRHS bc
+  , _bcSubdomains = bcSubdomains
+  }
+  where
+  (bcType, bcField) = buildLHS $ Parser._bcLHS bc
+  getFieldName ident = Parser.stringLiteralValue . Parser._fieldName $ Parser.getFieldDef fdfl ident
+  buildLHS (Parser.FieldRef ident) = (Dirichlet, getFieldName ident)
+  buildLHS (Parser.FieldNormalDerivative (Parser.FieldRef ident)) = (Neumann, getFieldName ident)
+  buildLHS expr = error $ "Unexpected boundary condition LHS: " ++ show expr
+  bcSubdomains = case Parser._bcSubdomains bc of
+    Nothing -> [AllExteriorEdges]
+    Just domains -> (TaggedEdgeString . Parser.stringLiteralValue) <$> domains
+
 buildSolve :: Mesh -> Parser.FDFL -> Parser.Solve -> Solve
 buildSolve mesh fdfl solve = Solve
   { _solveName = Parser.stringLiteralValue $ Parser._solveName solve
   , _solveSpatialOrder = Parser._solveSpatialOrder solve
   , _solveTemporalOrder = temporalOrder
   , _solveUpdates = (buildUpdate mesh fdfl solve . getExpressionDef) <$> (Parser._solveEquations solve)
+  , _solveBoundaryConditions = (buildBoundaryCondition mesh fdfl solve . getBCDef) <$> (Parser._solveBoundaryConditions solve)
   }
   where
   temporalOrder = Parser._solveTemporalOrder solve
   getExpressionDef ident = case Parser.getSymbol fdfl ident of
     Just (Parser.EquationDef equ) -> equ
     _ -> error $ "buildSolve: unknown equation " ++ Parser.identifierValue ident
+  getBCDef ident = case Parser.getSymbol fdfl ident of
+    Just (Parser.BoundaryConditionDef bc) -> bc
+    _ -> error $ "buildSolve: unknown boundary condition " ++ Parser.identifierValue ident
 
 buildAdamsBashForth :: Integer -> Integer -> Expression TemporalTerminal
 buildAdamsBashForth numDerivatives order =
@@ -378,6 +441,62 @@ computeStaggering first second = assert (length first == length second) computeS
     (True, False) -> StaggerNeg
     _ -> StaggerNone
 
+buildTensorRValue :: Mesh -> Parser.FDFL -> Parser.FieldExpr Parser.Identifier -> Tensor (Expression Terminal)
+buildTensorRValue mesh fdfl expr = case expr of
+  Parser.FieldTemporalDerivative _ -> error "buildUpdate: Temporal derivative not expected in RHS"
+  Parser.FieldNormalDerivative _ -> error "buildUpdate: Normal derivative not expected in RHS"
+  Parser.FieldAddition l r -> Tensor.add (buildTensorRValue mesh fdfl l) (buildTensorRValue mesh fdfl r)
+  Parser.FieldInner l r -> Tensor.inner (buildTensorRValue mesh fdfl l) (buildTensorRValue mesh fdfl r)
+  Parser.FieldOuter l r -> Tensor.outer (buildTensorRValue mesh fdfl l) (buildTensorRValue mesh fdfl r)
+  Parser.FieldDot l r -> Tensor.dot (buildTensorRValue mesh fdfl l) (buildTensorRValue mesh fdfl r)
+  Parser.FieldDivision l r -> Tensor.divide (buildTensorRValue mesh fdfl l) (buildTensorRValue mesh fdfl r)
+  Parser.FieldGradient t -> Tensor.outerWithOp ($) nabla (buildTensorRValue mesh fdfl t)
+  Parser.FieldDivergence t -> Tensor.dotWithOp ($) (+) nabla (buildTensorRValue mesh fdfl t)
+  Parser.FieldSpatialDerivative t i -> genDerivative i <$> (buildTensorRValue mesh fdfl t)
+  Parser.FieldLiteral literal -> case literal of
+    Parser.ScalarConstant s -> Tensor.constructTensor dimension 0 [ConstantFloat s]
+    Parser.PermutationSymbol -> genLC dimension
+  Parser.FieldRef ref -> case Parser.getSymbol fdfl ref of
+    Just (Parser.ConstantDef constant) ->
+      buildAccessTensor (Parser._constantName constant) (Parser._constantRank constant) constructor
+        where
+        constructor name = Symbol . ConstantRef name
+    Just (Parser.FieldDef field) ->
+      buildAccessTensor (Parser._fieldName field) (Parser._fieldRank field) constructor
+        where
+        constructor name index = Function (FieldRef name index) directions
+    Just (Parser.FieldExprDef def) -> buildTensorRValue mesh fdfl def
+    Just _ -> error $ "buildUpdate: unable to treat symbol as field: " ++ Parser.identifierValue ref
+    Nothing -> error $ "buildUpdate: unknown symbol " ++ Parser.identifierValue ref
+  where
+  dimension = _meshDimension mesh
+  nabla :: Tensor (Expression Terminal -> Expression Terminal)
+  nabla = Tensor.generateTensor dimension 1 genNabla
+  genNabla :: TensorIndex -> (Expression Terminal -> Expression Terminal)
+  genNabla [dim] = genDerivative dim
+  genNabla _ = error "genNabla: called for wrong rank"
+  genDerivative :: Integer -> Expression Terminal -> Expression Terminal
+  genDerivative dir = diff (Direction dir)
+  genLC :: Integer -> Tensor (Expression Terminal)
+  genLC dim = case dim of
+    2 -> Tensor.constructTensor 2 2 [0, 1, -1, 0]
+    3 -> Tensor.generateTensor 3 3 e3D
+      where
+      e3D idx = case idx of
+        [0,1,2] -> 1
+        [1,2,0] -> 1
+        [2,0,1] -> 1
+        [2,1,0] -> -1
+        [0,2,1] -> -1
+        [1,0,2] -> -1
+        _ -> 0
+    _ -> error $ "genLC: cannot generate Levi-Civita for dimension " ++ show dim
+  buildAccessTensor name rank constructor = Tensor.generateTensor dimension rank gen
+    where
+    gen idx = constructor (Parser.stringLiteralValue name) idx
+  directions = Symbol . Direction <$> [0 .. dimension -1]
+
+
 buildUpdate :: Mesh -> Parser.FDFL -> Parser.Solve -> Parser.Equation -> Update
 buildUpdate mesh fdfl solve equ = Update
   { _updateLHS = lhs
@@ -387,9 +506,8 @@ buildUpdate mesh fdfl solve equ = Update
   }
   where
   getFieldName = Parser.stringLiteralValue . Parser._fieldName
-  dimension = _meshDimension mesh
   lhs = buildLHS $ Parser._fieldUpdateLHS equ
-  rhs = buildRHS $ Parser._fieldUpdateRHS equ
+  rhs = buildTensorRValue mesh fdfl $ Parser._fieldUpdateRHS equ
   rhsDiscrete = buildRHSDiscrete mesh fdfl solve equ lhs rhs
   temporalOrder = Parser._solveTemporalOrder solve
   timestepping = case lhs of
@@ -399,56 +517,3 @@ buildUpdate mesh fdfl solve equ = Update
     buildDerivative n (Parser.FieldTemporalDerivative subExpr) = buildDerivative (n + 1) subExpr
     buildDerivative n (Parser.FieldRef ident) = FieldTemporalDerivative (getFieldName $ Parser.getFieldDef fdfl ident) n
     buildDerivative _ _ = error $ "Unsupported LHS: " ++ show expr
-  buildRHS :: Parser.FieldExpr Parser.Identifier -> Tensor (Expression Terminal)
-  buildRHS expr = case expr of
-    Parser.FieldTemporalDerivative _ -> error "buildUpdate: Temporal derivative not expected in RHS"
-    Parser.FieldNormalDerivative _ -> error "buildUpdate: Normal derivative not expected in RHS"
-    Parser.FieldAddition l r -> Tensor.add (buildRHS l) (buildRHS r)
-    Parser.FieldInner l r -> Tensor.inner (buildRHS l) (buildRHS r)
-    Parser.FieldOuter l r -> Tensor.outer (buildRHS l) (buildRHS r)
-    Parser.FieldDot l r -> Tensor.dot (buildRHS l) (buildRHS r)
-    Parser.FieldDivision l r -> Tensor.divide (buildRHS l) (buildRHS r)
-    Parser.FieldGradient t -> Tensor.outerWithOp ($) nabla (buildRHS t)
-    Parser.FieldDivergence t -> Tensor.dotWithOp ($) (+) nabla (buildRHS t)
-    Parser.FieldSpatialDerivative t i -> genDerivative i <$> (buildRHS t)
-    Parser.FieldLiteral literal -> case literal of
-      Parser.ScalarConstant s -> Tensor.constructTensor dimension 0 [ConstantFloat s]
-      Parser.PermutationSymbol -> genLC dimension
-    Parser.FieldRef ref -> case Parser.getSymbol fdfl ref of
-      Just (Parser.ConstantDef constant) ->
-        buildAccessTensor (Parser._constantName constant) (Parser._constantRank constant) constructor
-          where
-          constructor name = Symbol . ConstantRef name
-      Just (Parser.FieldDef field) ->
-        buildAccessTensor (Parser._fieldName field) (Parser._fieldRank field) constructor
-          where
-          constructor name index = Function (FieldRef name index) directions
-      Just (Parser.FieldExprDef def) -> buildRHS def
-      Just _ -> error $ "buildUpdate: unable to treat symbol as field: " ++ Parser.identifierValue ref
-      Nothing -> error $ "buildUpdate: unknown symbol " ++ Parser.identifierValue ref
-    where
-    nabla :: Tensor (Expression Terminal -> Expression Terminal)
-    nabla = Tensor.generateTensor dimension 1 genNabla
-    genNabla :: TensorIndex -> (Expression Terminal -> Expression Terminal)
-    genNabla [dim] = genDerivative dim
-    genNabla _ = error "genNabla: called for wrong rank"
-    genDerivative :: Integer -> Expression Terminal -> Expression Terminal
-    genDerivative dir = diff (Direction dir)
-    genLC :: Integer -> Tensor (Expression Terminal)
-    genLC dim = case dim of
-      2 -> Tensor.constructTensor 2 2 [0, 1, -1, 0]
-      3 -> Tensor.generateTensor 3 3 e3D
-        where
-        e3D idx = case idx of
-          [0,1,2] -> 1
-          [1,2,0] -> 1
-          [2,0,1] -> 1
-          [2,1,0] -> -1
-          [0,2,1] -> -1
-          [1,0,2] -> -1
-          _ -> 0
-      _ -> error $ "genLC: cannot generate Levi-Civita for dimension " ++ show dim
-    buildAccessTensor name rank constructor = Tensor.generateTensor dimension rank gen
-      where
-      gen idx = constructor (Parser.stringLiteralValue name) idx
-    directions = Symbol . Direction <$> [0 .. dimension -1]

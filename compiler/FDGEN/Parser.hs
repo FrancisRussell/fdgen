@@ -4,7 +4,7 @@ module FDGEN.Parser ( parseInput, FDFL, getSymbols, Definition(..)
                     , getSymbol, Field(..), Solve(..), Equation(..)
                     , FieldExpr(..), getFieldDef, LiteralConstant(..)
                     , Constant(..), Identifier(..), StaggerStrategy(..)
-                    ) where
+                    , BoundaryCondition(..)) where
 import Data.Char (toLower)
 import Data.Map (Map)
 import Data.Maybe (isJust)
@@ -150,7 +150,7 @@ instance PrettyPrintable Equation
 data BoundaryCondition = BoundaryCondition {
   _bcLHS :: FieldExpr Identifier,
   _bcRHS :: FieldExpr Identifier,
-  _bcSubdomains :: [StringLiteral]
+  _bcSubdomains :: Maybe [StringLiteral]
 } deriving Show
 
 instance PrettyPrintable BoundaryCondition
@@ -459,7 +459,7 @@ instance FDFLObject BoundaryCondition where
   emptyObject = BoundaryCondition
     { _bcLHS = error "undefined bcLHS"
     , _bcRHS = error "undefined bcRHS"
-    , _bcSubdomains = error "undefined bcSubdomains"
+    , _bcSubdomains = Nothing
     }
 
 instance FDFLObject Constant where
@@ -484,6 +484,9 @@ class FDFLParsable a where
 
 instance FDFLParsable s => FDFLParsable [s] where
   parse = parseBrackets $ parseCommaSep parse
+
+instance FDFLParsable s => FDFLParsable (Maybe s) where
+  parse = Just <$> parse
 
 instance FDFLParsable (FieldExpr Identifier) where
   parse = expr
