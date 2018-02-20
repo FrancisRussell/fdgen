@@ -297,9 +297,6 @@ validateDefinition validate friendlyType name = do
       then return $ name
       else parserFail $ identifierValue name ++ "should be of type " ++ friendlyType ++ " but is not."
 
-knownIdentifier :: Validator Identifier
-knownIdentifier = validateDefinition (const True) "any"
-
 isFieldLike :: Validator Identifier
 isFieldLike = validateDefinition validate "field"
   where validate def = case def of

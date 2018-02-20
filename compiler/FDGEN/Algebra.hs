@@ -311,12 +311,12 @@ vars (Int e sym) = Set.insert sym (vars e)
 vars (Function sym params) = foldl Set.union (Set.singleton sym) (vars <$> params)
 
 polyCoeff :: Ord e => Expression e -> e -> Int -> Maybe (Expression e)
-polyCoeff exp sym power = (!! power) <$> (++ repeat 0) <$> polyCoeffs exp sym
+polyCoeff expr sym power = (!! power) <$> (++ repeat 0) <$> polyCoeffs expr sym
 
 polyCoeffs :: Ord e => Expression e -> e -> Maybe [Expression e]
-polyCoeffs exp sym = if depends (Set.singleton sym) exp
-  then polyCoeffs' exp
-  else Just [exp]
+polyCoeffs expr sym = if depends (Set.singleton sym) expr
+  then polyCoeffs' expr
+  else Just [expr]
   where
   combineCoeffs :: Ord e => [Expression e] -> [Expression e] -> [Expression e]
   combineCoeffs a b = take totalLength $ zipWith (+) a' b'
@@ -343,7 +343,7 @@ polyCoeffs exp sym = if depends (Set.singleton sym) exp
     pad l = l ++ (take (totalLength - length l) $ repeat 0)
     a' = pad a
     b' = pad b
-    subTerms idx = (\(a,b) -> a * b) <$> (zip a' (drop (totalLength - idx - 1) (reverse b')))
+    subTerms idx = zipWith (*) a' (drop (totalLength - idx - 1) (reverse b'))
   polyCoeffs' (Symbol s) = Just $ if s == sym then [0.0, 1.0] else []
   polyCoeffs' (Sum seq') =
     foldl (liftM2 combineCoeffs) (Just []) $ map (\(e, c) -> polyCoeffs (fromRational c * e) sym) (toPairs seq')

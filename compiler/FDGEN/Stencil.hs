@@ -5,7 +5,7 @@ import Data.Char (chr, ord)
 import Data.List (genericIndex, genericLength)
 import Data.Map (Map)
 import Data.Ratio ((%))
-import FDGEN.Algebra (Expression(..), expand, lagrange, subst, substSymbols, diff, vars, polyCoeff)
+import FDGEN.Algebra (Expression(..), lagrange, subst, substSymbols, diff, vars, polyCoeff)
 import FDGEN.Pretty (PrettyPrintable, toDoc)
 import Text.PrettyPrint as PrettyPrint
 import qualified Data.Set as Set
@@ -67,8 +67,8 @@ buildStencil spec = assert (length derivatives == length staggering) result
   stencilWidth stagger derivative = if stagger == StaggerNone && derivative == 0
     then 1
     else order + derivative
-  stencilWidths = uncurry stencilWidth <$> zip staggering derivatives
-  originGrid = (negate . uncurry calculateStencilOffset) <$> zip stencilWidths staggering
+  stencilWidths = zipWith stencilWidth staggering derivatives
+  originGrid = negate <$> zipWith calculateStencilOffset stencilWidths staggering
   originSubstitutions = (\dim -> (Symbol $ Position dim, 0)) <$> [0..numDimensions - 1]
   interpolation = buildInterpolation $ zip3 stencilWidths originGrid staggering
   diff' sym power expression = genericIndex (iterate (diff sym) expression) power

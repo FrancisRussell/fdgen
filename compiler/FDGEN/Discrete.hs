@@ -51,8 +51,8 @@ instance PrettyPrintable SemiDiscreteTerminal
       else PrettyPrint.hcat [toDoc "(", toDoc topTerm, toDoc "/", toDoc bottomTerm, toDoc ")" ]
       where
       topTerm = PrettyPrint.hcat $ [ toDoc "d" ] ++ if total == 1 then [] else [toDoc "^", toDoc total]
-      bottomTerm = PrettyPrint.hcat $ raiseDiffVar <$> (zip ["x", "y", "z"] derivatives)
-      raiseDiffVar (v, p) = case p of
+      bottomTerm = PrettyPrint.hcat $ zipWith raiseDiffVar ["x", "y", "z"] derivatives
+      raiseDiffVar v p = case p of
         0 -> toDoc ""
         1 -> PrettyPrint.hcat [toDoc "d", toDoc v]
         _ -> PrettyPrint.hcat [toDoc "d", toDoc v, toDoc "^", toDoc p]
@@ -425,7 +425,7 @@ buildRHSDiscrete mesh _ solve _ lhs rhsContinuous = rhs
         relativeStaggering = computeStaggering lhsStaggering fieldStaggering
         stencilExpression = scaleFactor * (foldl (+) 0 terms)
         terms = buildTerm <$> Map.toList (_stencilValues stencil)
-        scaleFactor = foldl (*) (fromInteger 1) (map (\(a,b) -> a ^^ b) $ zip [Symbol $ GridSpacing i | i <- [0..]] (_stencilScalingPowers stencil))
+        scaleFactor = foldl (*) (fromInteger 1) (zipWith (^^) [Symbol $ GridSpacing i | i <- [0..]] (_stencilScalingPowers stencil))
         buildTerm (index, coeff) = (fromRational coeff) * (Symbol $ FieldDataRef name tensorIndex index)
         stencilSpec = StencilSpec
           { _stencilSpecOrder = order
@@ -436,9 +436,9 @@ buildRHSDiscrete mesh _ solve _ lhs rhsContinuous = rhs
       SemiDiscreteDirection _ -> error "Unexpected SemiDiscreteDirection found (should have been eliminated)."
 
 computeStaggering :: [Bool] -> [Bool] -> [Stagger]
-computeStaggering first second = assert (length first == length second) computeStagger <$> zip first second
+computeStaggering first second = assert (length first == length second) zipWith computeStagger first second
   where
-  computeStagger pair = case pair of
+  computeStagger f s = case (f, s) of
     (False, True) -> StaggerPos
     (True, False) -> StaggerNeg
     _ -> StaggerNone

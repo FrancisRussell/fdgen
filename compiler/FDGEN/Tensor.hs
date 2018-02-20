@@ -78,7 +78,7 @@ mapWithIndex f t = Tensor
     , _tensorEntries = tensorEntries
     }
     where
-    tensorEntries = (uncurry f) <$> zip [unflattenIndex t i | i <- [0..]] (_tensorEntries t)
+    tensorEntries = zipWith f [unflattenIndex t i | i <- [0..]] (_tensorEntries t)
 
 generateTensor :: Integer -> Integer -> (TensorIndex -> e) -> Tensor e
 generateTensor dim rank gen = genEntry <$> indexTensor
