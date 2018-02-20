@@ -349,7 +349,6 @@ buildBoundaryCondition mesh fdfl _solve bc = BoundaryCondition
   }
   where
   (bcType, bcField) = buildLHS $ Parser._bcLHS bc
-  getFieldName ident = Parser.stringLiteralValue . Parser._fieldName $ Parser.getFieldDef fdfl ident
   buildLHS (Parser.FieldNormalDerivative lValue) = (Neumann, findLValue mesh fdfl lValue)
   buildLHS lValue = (Dirichlet, findLValue mesh fdfl lValue)
   bcSubdomains = case Parser._bcSubdomains bc of
@@ -448,14 +447,15 @@ buildTensorRValue :: Mesh -> Parser.FDFL -> Parser.FieldExpr Parser.Identifier -
 buildTensorRValue mesh fdfl expr = case expr of
   Parser.FieldTemporalDerivative _ -> error "buildUpdate: Temporal derivative not expected in RHS"
   Parser.FieldNormalDerivative _ -> error "buildUpdate: Normal derivative not expected in RHS"
-  Parser.FieldAddition l r -> Tensor.add (buildTensorRValue mesh fdfl l) (buildTensorRValue mesh fdfl r)
-  Parser.FieldInner l r -> Tensor.inner (buildTensorRValue mesh fdfl l) (buildTensorRValue mesh fdfl r)
-  Parser.FieldOuter l r -> Tensor.outer (buildTensorRValue mesh fdfl l) (buildTensorRValue mesh fdfl r)
-  Parser.FieldDot l r -> Tensor.dot (buildTensorRValue mesh fdfl l) (buildTensorRValue mesh fdfl r)
-  Parser.FieldDivision l r -> Tensor.divide (buildTensorRValue mesh fdfl l) (buildTensorRValue mesh fdfl r)
-  Parser.FieldGradient t -> Tensor.outerWithOp ($) nabla (buildTensorRValue mesh fdfl t)
-  Parser.FieldDivergence t -> Tensor.dotWithOp ($) (+) nabla (buildTensorRValue mesh fdfl t)
-  Parser.FieldSpatialDerivative t i -> genDerivative i <$> (buildTensorRValue mesh fdfl t)
+  Parser.FieldAddition l r -> Tensor.add (buildRValue l) (buildRValue r)
+  Parser.FieldInner l r -> Tensor.inner (buildRValue l) (buildRValue r)
+  Parser.FieldOuter l r -> Tensor.outer (buildRValue l) (buildRValue r)
+  Parser.FieldDot l r -> Tensor.dot (buildRValue l) (buildRValue r)
+  Parser.FieldDivision l r -> Tensor.divide (buildRValue l) (buildRValue r)
+  Parser.FieldGradient t -> Tensor.outerWithOp ($) nabla (buildRValue t)
+  Parser.FieldDivergence t -> Tensor.dotWithOp ($) (+) nabla (buildRValue t)
+  Parser.FieldSpatialDerivative t i -> genDerivative i <$> (buildRValue t)
+  Parser.FieldIndexOperation i t -> genScalar $ Tensor.getElement (buildRValue t) i
   Parser.FieldLiteral literal -> case literal of
     Parser.ScalarConstant s -> Tensor.constructTensor dimension 0 [ConstantFloat s]
     Parser.PermutationSymbol -> genLC dimension
@@ -468,13 +468,15 @@ buildTensorRValue mesh fdfl expr = case expr of
       buildAccessTensor (Parser._fieldName field) (Parser._fieldRank field) constructor
         where
         constructor name index = Function (FieldRef name index) directions
-    Just (Parser.FieldExprDef def) -> buildTensorRValue mesh fdfl def
-    Just _ -> error $ "buildUpdate: unable to treat symbol as field: " ++ Parser.identifierValue ref
-    Nothing -> error $ "buildUpdate: unknown symbol " ++ Parser.identifierValue ref
+    Just (Parser.FieldExprDef def) -> buildRValue def
+    Just _ -> error $ "buildTensorRValue: unable to treat symbol as field: " ++ Parser.identifierValue ref
+    Nothing -> error $ "buildTensorRValue: unknown symbol " ++ Parser.identifierValue ref
   where
   dimension = _meshDimension mesh
   nabla :: Tensor (Expression Terminal -> Expression Terminal)
   nabla = Tensor.generateTensor dimension 1 genNabla
+  buildRValue = buildTensorRValue mesh fdfl
+  genScalar s = Tensor.constructTensor dimension 0 [s]
   genNabla :: TensorIndex -> (Expression Terminal -> Expression Terminal)
   genNabla [dim] = genDerivative dim
   genNabla _ = error "genNabla: called for wrong rank"
@@ -498,7 +500,6 @@ buildTensorRValue mesh fdfl expr = case expr of
     where
     gen idx = constructor (Parser.stringLiteralValue name) idx
   directions = Symbol . Direction <$> [0 .. dimension -1]
-
 
 findLValue :: Mesh -> Parser.FDFL -> Parser.FieldExpr Parser.Identifier -> FieldLValue
 findLValue mesh fdfl expr = case expr of
