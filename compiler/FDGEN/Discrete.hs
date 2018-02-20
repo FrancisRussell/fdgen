@@ -266,11 +266,19 @@ instance PrettyPrintable BoundaryCondition
     ]
 
 buildDiscreteForm :: Parser.FDFL -> Discretised
-buildDiscreteForm fdfl = Discretised { _discretisedMeshes = catMaybes maybeMeshes }
+buildDiscreteForm fdfl = Discretised { _discretisedMeshes = meshes' }
   where
-  maybeMeshes = maybeBuildMesh <$> Map.elems (Parser.getSymbols fdfl)
+  meshes = catMaybes $ maybeBuildMesh <$> Map.elems (Parser.getSymbols fdfl)
   maybeBuildMesh (Parser.MeshDef meshDef) = Just $ buildMesh fdfl meshDef
   maybeBuildMesh _ = Nothing
+  meshes' = doSpatialDiscretisation <$> meshes
+
+doSpatialDiscretisation :: Mesh -> Mesh
+doSpatialDiscretisation = updateMesh
+  where
+  updateMesh mesh = mesh { _meshSolves = updateSolve mesh <$> _meshSolves mesh }
+  updateSolve mesh solve = solve { _solveUpdates = updateUpdate mesh solve <$> _solveUpdates solve }
+  updateUpdate mesh solve update = update { _updateRHSDiscrete = buildRHSDiscrete mesh solve update }
 
 buildTemplateDictionary :: Discretised -> Template.Dict
 buildTemplateDictionary discretised = Template.insert "meshes" (Template.ListVal $ Template.DictVal <$> meshes) Template.emptyDict
@@ -397,12 +405,14 @@ makeSemiDiscrete dimension expr = rewritten''
     Function sym@(SemiDiscreteFieldRef _ _ _) _ -> Symbol sym
     _ -> e
 
-buildRHSDiscrete :: Mesh -> Parser.FDFL -> Parser.Solve -> Parser.Equation ->
-                    FieldTemporalDerivative -> Tensor(Expression Terminal) -> Tensor(Expression DiscreteTerminal)
-buildRHSDiscrete mesh _ solve _ lhs rhsContinuous = rhs
+buildRHSDiscrete :: Mesh -> Solve ->
+                    Update -> Tensor(Expression DiscreteTerminal)
+buildRHSDiscrete mesh solve update = rhs
   where
+  lhs = _updateLHS update
+  rhsContinuous = _updateRHS update
   dimension = _meshDimension mesh
-  order = Parser._solveSpatialOrder solve
+  order = _solveSpatialOrder solve
   shape = Tensor.getShape rhsContinuous
   rhs = Tensor.mapWithIndex makeDiscrete rhsContinuous
   lhsFieldName = case lhs of
@@ -516,13 +526,12 @@ buildUpdate :: Mesh -> Parser.FDFL -> Parser.Solve -> Parser.Equation -> Update
 buildUpdate mesh fdfl solve equ = Update
   { _updateLHS = lhs
   , _updateRHS = rhs
-  , _updateRHSDiscrete = rhsDiscrete
+  , _updateRHSDiscrete = error "buildUpdate: spatial discretisation not yet applied"
   , _updateTimeSteppingSchemes = timestepping
   }
   where
   lhs = buildLHS $ Parser._fieldUpdateLHS equ
   rhs = buildTensorRValue mesh fdfl $ Parser._fieldUpdateRHS equ
-  rhsDiscrete = buildRHSDiscrete mesh fdfl solve equ lhs rhs
   temporalOrder = Parser._solveTemporalOrder solve
   timestepping = case lhs of
     FieldTemporalDerivative _ d -> Map.fromList [(n, buildAdamsBashForth d n) | n <- [1..temporalOrder]]
