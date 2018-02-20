@@ -3,7 +3,7 @@ module FDGEN.Tensor ( Tensor, getElement, setElement, add, sub, inner
                     , outerWithOp, dotWithOp, constructTensor
                     , generateTensor, TensorIndex, divide, mapWithIndex
                     , flattenIndex, getShape, TensorShaped(..)
-                    , constructShape) where
+                    , constructShape, numEntries, unflattenIndex) where
 import Control.Applicative ((<$>))
 import Data.Foldable (foldl')
 import Data.List.Split (chunksOf)

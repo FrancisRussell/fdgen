@@ -6,7 +6,7 @@ import FDGEN.Stencil (StencilSpec(..), Stencil(..), buildStencil, Stagger(..))
 import Control.Applicative ((<$>))
 import Control.Exception (assert)
 import Data.Maybe (catMaybes)
-import Data.List (genericIndex, genericTake, genericDrop, genericReplicate, genericLength)
+import Data.List (genericIndex, genericTake, genericDrop, genericReplicate, genericLength, intersperse)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified FDGEN.Parser as Parser
@@ -271,7 +271,7 @@ buildDiscreteForm fdfl = Discretised { _discretisedMeshes = meshes' }
   meshes = catMaybes $ maybeBuildMesh <$> Map.elems (Parser.getSymbols fdfl)
   maybeBuildMesh (Parser.MeshDef meshDef) = Just $ buildMesh fdfl meshDef
   maybeBuildMesh _ = Nothing
-  meshes' = doSpatialDiscretisation <$> meshes
+  meshes' = doSpatialDiscretisation <$> scalarizeTensorFields <$> meshes
 
 doSpatialDiscretisation :: Mesh -> Mesh
 doSpatialDiscretisation = updateMesh
@@ -279,6 +279,67 @@ doSpatialDiscretisation = updateMesh
   updateMesh mesh = mesh { _meshSolves = updateSolve mesh <$> _meshSolves mesh }
   updateSolve mesh solve = solve { _solveUpdates = updateUpdate mesh solve <$> _solveUpdates solve }
   updateUpdate mesh solve update = update { _updateRHSDiscrete = buildRHSDiscrete mesh solve update }
+
+scalarizeTensorFields :: Mesh -> Mesh
+scalarizeTensorFields m = updateMesh m
+  where
+  dim = _meshDimension m
+  genFlattenedName name index = concat $ intersperse "_" (name:(show <$> index))
+  flattenTerminal terminal = case terminal of
+    FieldRef name index -> FieldRef (genFlattenedName name index) []
+    ConstantRef name index -> ConstantRef (genFlattenedName name index) []
+    Direction _ -> terminal
+  genIndices prefix rank = [genSuffix idx | idx <- [0..count-1]]
+    where
+    shape = Tensor.constructShape dim (rank - genericLength prefix)
+    count = Tensor.numEntries shape
+    genSuffix idx = prefix ++ Tensor.unflattenIndex shape idx
+  updateMesh mesh = mesh
+    { _meshFields = updateField mesh `concatMap` _meshFields mesh
+    , _meshSolves = updateSolve mesh <$> _meshSolves mesh
+    }
+  updateField mesh field = [genScalarField field suffix staggering | (staggering, suffix) <- zip (_fieldStaggerSpatial field) suffixes]
+    where
+    rank = _fieldRank field
+    suffixes = genIndices [] rank
+    genScalarField f suffix staggering = f
+      { _fieldName = genFlattenedName (_fieldName field) suffix
+      , _fieldStaggerSpatial = [staggering]
+      , _fieldRank = 0
+      }
+  updateSolve mesh solve = solve
+    { _solveUpdates = updateUpdate mesh solve `concatMap` _solveUpdates solve
+    , _solveBoundaryConditions = updateBC mesh solve `concatMap` _solveBoundaryConditions solve
+    }
+  updateUpdate mesh solve update = [genScalarUpdate update index | index <- suffixes]
+    where
+    FieldTemporalDerivative (FieldLValue fieldName idx) degree = _updateLHS update
+    field = meshGetField mesh fieldName
+    rank = _fieldRank field
+    rhsRank = rank - genericLength idx
+    suffixes = genIndices idx rank
+    genScalarUpdate u index = u
+      { _updateLHS = FieldTemporalDerivative (FieldLValue (genFlattenedName fieldName index) []) degree
+      , _updateRHS = Tensor.generateTensor dim 0 (const rhsValue')
+      }
+      where
+      rhsIndex = genericDrop (rank - rhsRank) index
+      rhsValue = Tensor.getElement (_updateRHS u) rhsIndex
+      rhsValue' = substSymbols flattenTerminal rhsValue
+  updateBC mesh solve bc = [genScalarBC bc index | index <- suffixes]
+    where
+    (FieldLValue fieldName idx) = _bcField bc
+    field = meshGetField mesh fieldName
+    rank = _fieldRank field
+    rhsRank = rank - genericLength idx
+    suffixes = genIndices idx rank
+    genScalarBC bc index = bc
+      { _bcField = FieldLValue (genFlattenedName fieldName index) []
+      , _bcRHS = Tensor.generateTensor dim 0 (const rhsValue)
+      }
+      where
+      rhsIndex = genericDrop (rank - rhsRank) index
+      rhsValue = Tensor.getElement (_bcRHS bc) rhsIndex
 
 buildTemplateDictionary :: Discretised -> Template.Dict
 buildTemplateDictionary discretised = Template.insert "meshes" (Template.ListVal $ Template.DictVal <$> meshes) Template.emptyDict
