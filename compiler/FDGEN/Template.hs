@@ -6,7 +6,7 @@ import Data.Map.Strict (Map)
 import qualified Control.Lens as Lens
 import qualified Data.Map.Strict as Map
 import Text.Parsec.Language (emptyDef, LanguageDef)
-import Text.Parsec (ParsecT, ParseError, runParser, Parsec, try)
+import Text.Parsec (ParsecT, runParser, Parsec, try)
 import Text.Parsec.Token (GenTokenParser(..), GenLanguageDef(..), makeTokenParser)
 import Text.Parsec.Combinator (eof, choice, many1, sepBy1)
 import Text.Parsec.Char (letter, string, noneOf)

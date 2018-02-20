@@ -351,12 +351,12 @@ polyCoeffs exp sym = if depends (Set.singleton sym) exp
     foldl (liftM2 multiplyCoeffs) (Just [1.0]) $ map (\(a, p) -> (flip raiseCoeffs $ p) =<< (polyCoeffs a sym)) (toPairs seq')
   polyCoeffs' n@(ConstantFloat _) = Just [n]
   polyCoeffs' n@(ConstantRational _) = Just [n]
-  polyCoeffs' (Abs expr) = Nothing
-  polyCoeffs' (Signum expr) = Nothing
-  polyCoeffs' (Ln expr) = Nothing
-  polyCoeffs' (Diff e _sym _) = Nothing
-  polyCoeffs' (Int e sym) = Nothing
-  polyCoeffs' (Function sym params) = Nothing
+  polyCoeffs' (Abs _expr) = Nothing
+  polyCoeffs' (Signum _expr) = Nothing
+  polyCoeffs' (Ln _expr) = Nothing
+  polyCoeffs' (Diff _expr _sym _power) = Nothing
+  polyCoeffs' (Int _expr _sym) = Nothing
+  polyCoeffs' (Function _sym _params) = Nothing
 
 extractElem :: [a] -> Int -> (a, [a])
 extractElem lst index = (elem', rest)
