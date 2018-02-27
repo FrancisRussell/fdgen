@@ -6,11 +6,12 @@ H = Constant(name="h0")
 
 VelocityEq = Equation(Dt(u), nu * div(grad(u)) - dot(u, grad(u)) - g * grad(h))
 HeightEq = Equation(Dt(h), -div((h + H) * u))
-VelocityBC = BoundaryCondition(u, [0, 0], subdomains=["left_edge", "right_edge", "top_edge", "bottom_edge"])
+VelocityBC_H = BoundaryCondition(u[0], 0, subdomains=["top_edge", "bottom_edge"])
+VelocityBC_V = BoundaryCondition(u[1], 0, subdomains=["left_edge", "right_edge"])
 HeightBC = BoundaryCondition(Dn(h), 0)
 
 TimeStep = Solve(name="step", spatial_order=1, temporal_order=3, equations=[VelocityEq, HeightEq], 
-  boundary_conditions=[VelocityBC, HeightBC])
+  boundary_conditions=[VelocityBC_H, VelocityBC_V, HeightBC])
 
 m = Mesh(name="shallow_water", dimension=2, fields=[u, h], solves=[TimeStep])
 
