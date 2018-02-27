@@ -90,6 +90,7 @@ data FieldExpr a
   | FieldTemporalDerivative (FieldExpr a)
   | FieldNormalDerivative (FieldExpr a)
   | FieldIndexOperation [Integer] (FieldExpr a)
+  | FieldTensorElements [FieldExpr a]
   deriving Show
 
 instance PrettyPrintable a => PrettyPrintable (FieldExpr a)
@@ -109,16 +110,17 @@ instance PrettyPrintable a => PrettyPrintable (FieldExpr a)
     FieldLiteral (ScalarConstant r) -> PrettyPrint.double r
     FieldLiteral PermutationSymbol -> text "epsilon"
     FieldIndexOperation indices a -> hcat [toDoc a , hListDoc indices]
+    FieldTensorElements elements -> hcat [text "[", printList elements, text "]"]
     where
       text = PrettyPrint.text
       hcat = PrettyPrint.hcat
       dim x = genericIndex (text <$> ["x", "y", "z"] ++ ["dim(" ++ show n ++ ")" | n <- [3..] :: [Integer]]) x
       binaryOp op a b = hcat [text "(", toDoc a, text $ " " ++ op ++ " ", toDoc b, text ")"]
-      function name params = hcat [prefix, content, suffix]
+      printList elements = hcat $ PrettyPrint.punctuate (text ", ") (toDoc <$> elements)
+      function name params = hcat [prefix, printList params, suffix]
         where
         prefix = text $ name ++ "("
         suffix = text ")"
-        content = hcat $ PrettyPrint.punctuate (text ", ") (toDoc <$> params)
 
 data LiteralConstant
   = ScalarConstant Double
@@ -506,6 +508,7 @@ instance FDFLParsable (FieldExpr Identifier) where
       , FieldLiteral <$> parse
       , FieldRef <$> (parse >>= isFieldLike)
       , parseParens expr
+      , FieldTensorElements <$> parseExpressionList
       ]
     parseUnary name constructor =
       parseReserved name >> constructor <$> parseParens parse
@@ -529,6 +532,7 @@ instance FDFLParsable (FieldExpr Identifier) where
       ]
     negate' = FieldOuter . FieldLiteral . ScalarConstant $ -1.0
     parseIndices = parseBrackets $ parseCommaSep parseInteger
+    parseExpressionList = parseBrackets $ parseCommaSep expr
 
 parseBoundedEnum :: (Show a, Enum a, Bounded a) => FDFLParser a
 parseBoundedEnum = choice $ toParser <$> values

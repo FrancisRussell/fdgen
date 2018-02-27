@@ -3,12 +3,14 @@ module FDGEN.Tensor ( Tensor, getElement, setElement, add, sub, inner
                     , outerWithOp, dotWithOp, constructTensor
                     , generateTensor, TensorIndex, divide, mapWithIndex
                     , flattenIndex, getShape, TensorShaped(..)
-                    , constructShape, numEntries, unflattenIndex) where
+                    , constructShape, numEntries, unflattenIndex
+                    , fromSubTensors) where
 import Control.Applicative ((<$>))
 import Data.Foldable (foldl')
 import Data.List.Split (chunksOf)
-import Data.List (transpose, genericIndex, genericSplitAt)
+import Data.List (transpose, genericIndex, genericSplitAt, genericLength)
 import FDGEN.Pretty (PrettyPrintable(..), structureDoc, vListDoc)
+import qualified Data.Set as Set
 
 data Tensor e = Tensor
   { _tensorDim :: Integer
@@ -63,6 +65,27 @@ constructTensor dim rank entries = if dim < 0
     , _tensorRank = rank
     , _tensorEntries = entries
     }
+
+fromSubTensors :: [Tensor e] -> Tensor e
+fromSubTensors elements = case genericLength elements == dimension of
+  True -> constructTensor dimension (rank + 1) entries
+  False -> error $ "fromSubTensors: sub-tensors have dimension of " ++
+                   show dimension ++ " but only " ++ (show $ length elements) ++
+                   " sub-tensor(s) given."
+  where
+  rank = case checkIdentical $ tensorRank <$> elements of
+    Just r -> r
+    Nothing -> error "fromSubTensors: mismatched rank in sub-tensors"
+  dimension = case checkIdentical $ tensorDim <$> elements of
+    Just d -> d
+    Nothing -> error "fromSubTensors: mismatched dimension in sub-tensors"
+  entries = concat $ _tensorEntries <$> elements
+
+checkIdentical :: Ord e => [e] -> Maybe e
+checkIdentical elems = case Set.toList $ Set.fromList elems of
+  [] -> Nothing
+  [elem] -> Just elem
+  _ -> Nothing
 
 instance Functor Tensor where
   fmap f t = Tensor

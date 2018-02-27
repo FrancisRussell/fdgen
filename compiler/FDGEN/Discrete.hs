@@ -542,6 +542,7 @@ buildTensorRValue mesh fdfl expr = case expr of
     Just (Parser.FieldExprDef def) -> buildRValue def
     Just _ -> error $ "buildTensorRValue: unable to treat symbol as field: " ++ Parser.identifierValue ref
     Nothing -> error $ "buildTensorRValue: unknown symbol " ++ Parser.identifierValue ref
+  Parser.FieldTensorElements elements -> Tensor.fromSubTensors $ buildRValue <$> elements
   where
   dimension = _meshDimension mesh
   nabla :: Tensor (Expression Terminal -> Expression Terminal)

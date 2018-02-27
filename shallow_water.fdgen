@@ -6,7 +6,7 @@ H = Constant(name="h0")
 
 VelocityEq = Equation(Dt(u), nu * div(grad(u)) - dot(u, grad(u)) - g * grad(h))
 HeightEq = Equation(Dt(h), -div((h + H) * u))
-VelocityBC = BoundaryCondition(u, 0, subdomains=["left_edge", "right_edge", "top_edge", "bottom_edge"])
+VelocityBC = BoundaryCondition(u, [0, 0], subdomains=["left_edge", "right_edge", "top_edge", "bottom_edge"])
 HeightBC = BoundaryCondition(Dn(h), 0)
 
 TimeStep = Solve(name="step", spatial_order=1, temporal_order=3, equations=[VelocityEq, HeightEq], 
