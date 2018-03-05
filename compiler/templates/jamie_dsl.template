@@ -7,3 +7,8 @@ import DSL
 ${for field in fields}
 ${field.name} = CellVariable "${field.name}"
 ${end}
+
+model = do
+${for field in fields}
+  addUpdate "${field.name}" ${field.update}
+${end}

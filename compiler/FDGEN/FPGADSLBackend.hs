@@ -10,13 +10,13 @@ import qualified Data.Map.Strict as Map
 
 data FPGADSLBackend = FPGADSLBackend
 
-data Context = Context {
-  _contextCellVariables :: [CellVariable]
-} deriving Show
+data Context = Context
+  { _contextCellVariables :: [CellVariable]
+  } deriving Show
 
 data CellVariable = CellVariable
   { _cellVariableName :: String
-} deriving Show
+  } deriving Show
 
 getSingleton :: String -> [e] -> e
 getSingleton _ [e] = e
