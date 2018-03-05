@@ -8,8 +8,8 @@ import qualified Data.Map.Strict as Map
 import Text.Parsec.Language (emptyDef, LanguageDef)
 import Text.Parsec (ParsecT, runParser, Parsec, try)
 import Text.Parsec.Token (GenTokenParser(..), GenLanguageDef(..), makeTokenParser)
-import Text.Parsec.Combinator (eof, choice, many1, sepBy1)
-import Text.Parsec.Char (letter, string, noneOf)
+import Text.Parsec.Combinator (eof, choice, many1, sepBy1, optional)
+import Text.Parsec.Char (letter, string, noneOf, newline)
 import Text.Parsec.Prim (many, parserFail)
 
 type Path = [ String ]
@@ -124,6 +124,7 @@ parseDirectiveWrapper :: Parsec String TemplateParseState e -> Parsec String Tem
 parseDirectiveWrapper contentParser = do
   content <- try (string "${" >> contentParser)
   _ <- string "}"
+  _ <- optional newline
   return content
 
 parseDirective :: TemplateElementParser
