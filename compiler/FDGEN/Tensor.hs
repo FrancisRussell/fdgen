@@ -4,12 +4,13 @@ module FDGEN.Tensor ( Tensor, getElement, setElement, add, sub, inner
                     , generateTensor, TensorIndex, divide, mapWithIndex
                     , flattenIndex, getShape, TensorShaped(..)
                     , constructShape, numEntries, unflattenIndex
-                    , fromSubTensors) where
+                    , fromSubTensors, asScalar) where
 import Control.Applicative ((<$>))
 import Data.Foldable (foldl')
 import Data.List.Split (chunksOf)
 import Data.List (transpose, genericIndex, genericSplitAt, genericLength)
 import FDGEN.Pretty (PrettyPrintable(..), structureDoc, vListDoc)
+import Control.Exception (assert)
 import qualified Data.Set as Set
 
 data Tensor e = Tensor
@@ -209,3 +210,6 @@ dotWithOp mul combine a b = if tensorDim a /= tensorDim b
 
 dot :: Num a => Tensor a -> Tensor a -> Tensor a
 dot = dotWithOp (*) (+)
+
+asScalar :: Tensor a -> a
+asScalar t = assert (tensorRank t == 0) ((_tensorEntries t) !! 0)

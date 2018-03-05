@@ -1,5 +1,7 @@
-module FDGEN.Discrete (buildDiscreteForm, buildTemplateDictionary, Discretised) where
-import FDGEN.Algebra (Expression(..), diff, adamsBashforthGeneral, expandSymbols, substSymbols, rewriteFixedPoint)
+module FDGEN.Discrete (buildDiscreteForm, buildTemplateDictionary
+                      , Discretised(..), Mesh(..), Field(..), Solve(..), findFieldUpdate, FieldLValue(..)
+                      , numPreviousTimestepsNeeded) where
+import FDGEN.Algebra (Expression(..), diff, adamsBashforthGeneral, expandSymbols, substSymbols, rewriteFixedPoint, vars)
 import FDGEN.Tensor (Tensor, TensorIndex)
 import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, vListDoc)
 import FDGEN.Stencil (StencilSpec(..), Stencil(..), buildStencil, Stagger(..))
@@ -9,6 +11,7 @@ import Data.Maybe (catMaybes)
 import Data.List (genericIndex, genericTake, genericDrop, genericReplicate, genericLength, intersperse)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import qualified FDGEN.Parser as Parser
 import qualified FDGEN.Tensor as Tensor
 import qualified FDGEN.Template as Template
@@ -228,6 +231,13 @@ instance PrettyPrintable FieldTemporalDerivative
   toDoc (FieldTemporalDerivative f i) = if i /= 0
     then PrettyPrint.hcat [toDoc "(d^", toDoc i, toDoc " * ", toDoc f, toDoc ")/dt^", toDoc i]
     else toDoc f
+
+class ContainsLValue e where
+  getLValue :: e -> FieldLValue
+
+instance ContainsLValue FieldTemporalDerivative
+  where
+  getLValue (FieldTemporalDerivative lvalue _) = lvalue
 
 data Update = Update
   { _updateLHS :: FieldTemporalDerivative
@@ -583,6 +593,23 @@ findLValue mesh fdfl expr = case expr of
   where
   getFieldName = Parser.stringLiteralValue . Parser._fieldName . Parser.getFieldDef fdfl
   getFieldRank = _fieldRank . meshGetField mesh . getFieldName
+
+numPreviousTimestepsNeeded :: Update -> Integer
+numPreviousTimestepsNeeded update = foldl max 0 unknownsDerivatives
+  where
+  unknowns = Set.toList $ Map.foldl (\a b -> Set.union a (vars b)) Set.empty (_updateTimeSteppingSchemes update)
+  unknownsDerivatives = catMaybes $ derivativeOff <$> unknowns
+  derivativeOff sym = case sym of
+    PreviousDerivative n -> Just n
+    _ -> Nothing
+
+findFieldUpdate :: FieldLValue -> Solve -> Update
+findFieldUpdate lhs solve = case matchingUpdates of
+  [update] -> update
+  _ -> error $ "findFieldUpdateRHS: Unable to find update for " ++ show lhs
+  where
+  updates = _solveUpdates solve
+  matchingUpdates = filter (\u -> getLValue (_updateLHS u) == lhs) updates
 
 buildUpdate :: Mesh -> Parser.FDFL -> Parser.Solve -> Parser.Equation -> Update
 buildUpdate mesh fdfl solve equ = Update
