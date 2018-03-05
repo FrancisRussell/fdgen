@@ -1,4 +1,4 @@
-module FDGEN.Discrete (buildDiscreteForm, buildTemplateDictionary) where
+module FDGEN.Discrete (buildDiscreteForm, buildTemplateDictionary, Discretised) where
 import FDGEN.Algebra (Expression(..), diff, adamsBashforthGeneral, expandSymbols, substSymbols, rewriteFixedPoint)
 import FDGEN.Tensor (Tensor, TensorIndex)
 import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, vListDoc)

@@ -3,9 +3,11 @@ import System.Environment (getArgs)
 import System.IO (hPutStrLn, stderr)
 import System.Exit (exitFailure)
 import FDGEN.Parser (parseInput)
-import FDGEN.Discrete (buildDiscreteForm, buildTemplateDictionary)
+import FDGEN.Discrete (buildDiscreteForm)
 import FDGEN.Pretty (prettyPrint)
-import qualified FDGEN.Template as Template
+import FDGEN.Backend(Backend(..))
+import FDGEN.CppBackend (CppBackend(..))
+import FDGEN.FPGADSLBackend (FPGADSLBackend(..))
 
 main :: IO()
 main = getArgs >>= processFile . getFileName
@@ -17,15 +19,11 @@ getFileName _ = error "Usage: fgden input_file"
 processFile :: String -> IO()
 processFile filename = do
   contents <- readFile filename
-  template <- readFile "./templates/mesh.hpp.template"
   let result = parseInput filename contents in
     case result of
       Left err -> hPutStrLn stderr (show err) >> exitFailure
       Right spec -> (putStrLn $ prettyPrint spec) >>
-                    putStrLn "" >>
-                    (putStrLn . prettyPrint $ discreteForm) >>
-                    case Template.populate (buildTemplateDictionary discreteForm) template of
-                      Left err -> hPutStrLn stderr (show err) >> exitFailure
-                      Right generated -> putStrLn generated
+                    processDiscretised CppBackend discreteForm >>
+                    processDiscretised FPGADSLBackend discreteForm
                     where
                     discreteForm = buildDiscreteForm spec

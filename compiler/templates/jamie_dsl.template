@@ -1,0 +1,11 @@
+module Background(model, velidation) where
+import Prelude
+
+import DSL
+
+
+${for mesh in meshes}
+${for field in mesh.fields}
+${field.name} = CellVariable "${field.name}"
+${end}
+${end}

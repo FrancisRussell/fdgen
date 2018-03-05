@@ -11,6 +11,7 @@ Library
   GHC-Options:       -Wall -fno-warn-missing-signatures
   Build-Depends:     base, parsec, containers, lens, pretty, split
   Exposed-Modules:   FDGEN.Parser FDGEN.Algebra FDGEN.Pretty FDGEN.Tensor FDGEN.Discrete FDGEN.Template FDGEN.Stencil
+                     FDGEN.Backend, FDGEN.CppBackend FDGEN.FPGADSLBackend
 
 Executable fdgen
   Main-is:           Main.hs
