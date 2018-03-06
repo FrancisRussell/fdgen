@@ -1,8 +1,8 @@
 u = Field(name="velocity", rank=1, spatial_stagger_strategy="dimension")
 h = Field(name="height", rank=0, spatial_stagger_strategy="none")
-nu = Constant(name="nu")
-g = Constant(name="g")
-H = Constant(name="h0")
+nu = MeshConstant(name="nu")
+g = MeshConstant(name="g")
+H = MeshConstant(name="h0")
 
 VelocityEq = Equation(Dt(u), nu * div(grad(u)) - dot(u, grad(u)) - g * grad(h))
 HeightEq = Equation(Dt(h), -div((h + H) * u))

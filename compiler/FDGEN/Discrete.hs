@@ -541,8 +541,8 @@ buildTensorRValue mesh fdfl expr = case expr of
     Parser.ScalarConstant s -> Tensor.constructTensor dimension 0 [ConstantFloat s]
     Parser.PermutationSymbol -> genLC dimension
   Parser.FieldRef ref -> case Parser.getSymbol fdfl ref of
-    Just (Parser.ConstantDef constant) ->
-      buildAccessTensor (Parser._constantName constant) (Parser._constantRank constant) constructor
+    Just (Parser.MeshConstantDef constant) ->
+      buildAccessTensor (Parser._meshConstantName constant) (Parser._meshConstantRank constant) constructor
         where
         constructor name = Symbol . ConstantRef name
     Just (Parser.FieldDef field) ->

@@ -3,7 +3,7 @@ module FDGEN.Parser ( parseInput, FDFL, getSymbols, Definition(..)
                     , Mesh(..), stringLiteralValue, identifierValue
                     , getSymbol, Field(..), Solve(..), Equation(..)
                     , FieldExpr(..), getFieldDef, LiteralConstant(..)
-                    , Constant(..), Identifier(..), StaggerStrategy(..)
+                    , MeshConstant(..), Identifier(..), StaggerStrategy(..)
                     , BoundaryCondition(..)) where
 import Data.Char (toLower)
 import Data.Map (Map)
@@ -127,16 +127,16 @@ data LiteralConstant
   | PermutationSymbol
   deriving Show
 
-data Constant = Constant {
-  _constantRank :: Integer,
-  _constantName :: StringLiteral
+data MeshConstant = MeshConstant {
+  _meshConstantRank :: Integer,
+  _meshConstantName :: StringLiteral
 } deriving Show
 
-instance PrettyPrintable Constant
+instance PrettyPrintable MeshConstant
  where
- toDoc constant = structureDoc "Constant"
-   [ ("rank", toDoc $ _constantRank constant)
-   , ("name", toDoc $ _constantName constant)
+ toDoc constant = structureDoc "MeshConstant"
+   [ ("rank", toDoc $ _meshConstantRank constant)
+   , ("name", toDoc $ _meshConstantName constant)
    ]
 
 data Equation = Equation {
@@ -187,7 +187,7 @@ data Definition
  | MeshDef Mesh
  | EquationDef Equation
  | BoundaryConditionDef BoundaryCondition
- | ConstantDef Constant
+ | MeshConstantDef MeshConstant
  | FieldExprDef (FieldExpr Identifier)
  | SolveDef Solve
  deriving Show
@@ -199,7 +199,7 @@ instance PrettyPrintable Definition
    MeshDef m -> toDoc m
    EquationDef e -> toDoc e
    BoundaryConditionDef bc -> toDoc bc
-   ConstantDef c -> toDoc c
+   MeshConstantDef c -> toDoc c
    FieldExprDef f -> toDoc  f
    SolveDef s -> toDoc s
 
@@ -231,7 +231,7 @@ Lens.makeLenses ''FDFLParseState
 Lens.makeLenses ''Mesh
 Lens.makeLenses ''Field
 Lens.makeLenses ''Equation
-Lens.makeLenses ''Constant
+Lens.makeLenses ''MeshConstant
 Lens.makeLenses ''Solve
 Lens.makeLenses ''BoundaryCondition
 
@@ -304,7 +304,7 @@ isFieldLike = validateDefinition validate "field"
   where validate def = case def of
                          FieldDef _ -> True
                          FieldExprDef _ -> True
-                         ConstantDef _ -> True
+                         MeshConstantDef _ -> True
                          _ -> False
 isSolve :: Validator Identifier
 isSolve = validateDefinition validate "solve"
@@ -366,11 +366,11 @@ parseBoundaryCondition = ObjectParseSpec "BoundaryCondition"
   [ buildAttributeSpec "subdomains" False alwaysValid bcSubdomains
   ]
 
-parseConstant :: ObjectParseSpec Constant
-parseConstant = ObjectParseSpec "Constant"
+parseMeshConstant :: ObjectParseSpec MeshConstant
+parseMeshConstant = ObjectParseSpec "MeshConstant"
   []
-  [ buildAttributeSpec "name" True alwaysValid constantName
-  , buildAttributeSpec "rank" False alwaysValid constantRank
+  [ buildAttributeSpec "name" True alwaysValid meshConstantName
+  , buildAttributeSpec "rank" False alwaysValid meshConstantRank
   ]
 
 parseSolve :: ObjectParseSpec Solve
@@ -463,11 +463,11 @@ instance FDFLObject BoundaryCondition where
     , _bcSubdomains = Nothing
     }
 
-instance FDFLObject Constant where
-  wrapObject = ConstantDef
-  emptyObject = Constant
-    { _constantName = error "undefined constantName"
-    , _constantRank = 0
+instance FDFLObject MeshConstant where
+  wrapObject = MeshConstantDef
+  emptyObject = MeshConstant
+    { _meshConstantName = error "undefined constantName"
+    , _meshConstantRank = 0
     }
 
 instance FDFLObject Solve where
@@ -640,7 +640,7 @@ parseDefinition = choice
   , parseSpecToParser parseMesh
   , parseSpecToParser parseEquation
   , parseSpecToParser parseBoundaryCondition
-  , parseSpecToParser parseConstant
+  , parseSpecToParser parseMeshConstant
   , parseSpecToParser parseSolve
   , FieldExprDef <$> parse
   ]
