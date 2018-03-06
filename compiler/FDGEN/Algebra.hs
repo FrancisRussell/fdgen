@@ -8,7 +8,8 @@ import Data.List (genericIndex)
 import Data.Ratio ((%), denominator, numerator)
 import Data.Foldable (foldl')
 import FDGEN.Pretty (PrettyPrintable(..))
-import Text.PrettyPrint (Doc, hcat, char, parens, punctuate)
+import FDGEN.Precedence (Assoc(..), Precedence(..), pDoc, PDoc(..), renderTerminal, renderInfix)
+import Text.PrettyPrint (hcat, char, parens, punctuate)
 import Control.Applicative ((<$>))
 import Control.Monad (liftM2)
 import qualified Data.Map.Strict as Map
@@ -577,55 +578,24 @@ instance Ord e => Fractional (Expression e) where
   fromRational = ConstantRational
   (/) a = simplify . divide a
 
-data Precedence
- = AddPrec
- | MulPrec
- | PowPrec
- | TerminalPrec
- deriving (Eq, Ord, Show)
-
-data Assoc
- = LeftAssoc
- | RightAssoc
- | NoAssoc
- deriving (Eq, Show)
-
-pAssoc :: PDoc -> Assoc
-pAssoc (PDoc _ a _) = a
-
-pPrec :: PDoc -> Precedence
-pPrec (PDoc _ _ p) = p
-
-pDoc :: PDoc -> Doc
-pDoc (PDoc d _ _) = d
-
-data PDoc = PDoc Doc Assoc Precedence
+mulPrec = PrecLevel 2
+addPrec = PrecLevel 1
+powPrec = PrecLevel 0
 
 instance PrettyPrintable e => PrettyPrintable (Expression e) where
   toDoc expr = pDoc $ toPDoc expr
     where
-    renderTerminal :: PrettyPrintable a => a -> PDoc
-    renderTerminal t = PDoc (toDoc t) NoAssoc TerminalPrec
     renderInteger :: Integer -> PDoc
     renderInteger i = if i >= 0
-      then PDoc (toDoc i) NoAssoc TerminalPrec
-      else PDoc (hcat [char '-', toDoc (-i)]) NoAssoc AddPrec
+      then PDoc (toDoc i) NoAssoc AtomPrec
+      else PDoc (hcat [char '-', toDoc (-i)]) NoAssoc addPrec
     renderRational r = case denominator r of
        1 -> renderInteger $ numerator r
        _ -> renderDivision (renderInteger $ numerator r) (renderInteger $ denominator r)
-    renderBinary :: String -> Assoc -> Precedence -> PDoc -> PDoc -> PDoc
-    renderBinary op assoc prec left right = PDoc resultDoc assoc prec
-      where
-      doBracketing term = if pPrec term > prec || pPrec term == prec && pAssoc term == assoc
-        then pDoc term
-        else parens $ pDoc term
-      leftDoc = doBracketing left
-      rightDoc = doBracketing right
-      resultDoc = hcat [leftDoc, toDoc op, rightDoc]
-    renderDivision = renderBinary "/" LeftAssoc MulPrec
-    renderMultiplication = renderBinary "*" LeftAssoc MulPrec
-    renderAddition = renderBinary "+" LeftAssoc AddPrec
-    renderPower = renderBinary "^" RightAssoc PowPrec
+    renderDivision = renderInfix ("/", mulPrec, LeftAssoc)
+    renderMultiplication = renderInfix ("*", mulPrec, LeftAssoc)
+    renderAddition = renderInfix ("+", addPrec, LeftAssoc)
+    renderPower = renderInfix ("^", powPrec, RightAssoc)
     renderPairSeq :: (PairSeqLike t c, PrettyPrintable c) => PairSeq t c -> (PDoc -> PDoc -> PDoc) -> (PDoc -> PDoc -> PDoc) -> PDoc
     renderPairSeq seq' renderPair combineTerms = if Map.null $ _psTerms seq'
       then renderRational $ _psOverall seq'
