@@ -11,4 +11,5 @@ ${end}
 model = do
 ${for field in fields}
   addUpdate "${field.name}" ${field.update}
+
 ${end}

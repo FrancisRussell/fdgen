@@ -1,7 +1,8 @@
 {-# LANGUAGE TemplateHaskell, EmptyDataDecls, FlexibleInstances, MultiParamTypeClasses, ScopedTypeVariables #-}
 module FDGEN.Algebra ( Expression(..), subst, substSymbols, lagrange, diff, integrate, expand
                      , definiteIntegrate, adamsBashforth, adamsBashforthGeneral, vars
-                     , polyCoeff, polyCoeffs, expandSymbols, rewrite, rewriteFixedPoint) where
+                     , polyCoeff, polyCoeffs, expandSymbols, rewrite, rewriteFixedPoint
+                     , PairSeq(..)) where
 import Data.Map.Strict (Map)
 import Data.Set (Set)
 import Data.List (genericIndex)
