@@ -120,7 +120,6 @@ fieldToCellVariables discretised mesh solve field = (cellVariable:cellVariableDe
 buildDSLExpr :: Expression DiscreteTerminal -> DSLExpr
 buildDSLExpr expr = case expr of
   Symbol s -> case s of
-    GridSpacing i -> DSLConstant "h?" 0
     FieldDataRef name idx offsets  -> case offsets of
       [0, 0] -> DSLCellVariable name
       [x, y] -> DSLOffset (DSLCellVariable name) (fromIntegral x) (fromIntegral y)

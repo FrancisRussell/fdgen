@@ -68,7 +68,6 @@ instance PrettyPrintable SemiDiscreteTerminal
 data DiscreteTerminal
   = FieldDataRef String TensorIndex [Integer]
   | ConstantDataRef String TensorIndex
-  | GridSpacing Integer
   deriving (Eq, Ord, Show)
 
 instance PrettyPrintable DiscreteTerminal
@@ -76,7 +75,6 @@ instance PrettyPrintable DiscreteTerminal
   toDoc t = case t of
     FieldDataRef name tensorIndex stencilIndex -> fieldRef name tensorIndex stencilIndex
     ConstantDataRef name index -> constantRef name index
-    GridSpacing i -> toDoc $ genericIndex ["hx", "hy", "hz"] i
     where
     fieldRef name tensorIndex stencilIndex = PrettyPrint.hcat [toDoc name, indexDoc tensorIndex, indexDoc stencilIndex]
     constantRef name tensorIndex = PrettyPrint.hcat [toDoc name, indexDoc tensorIndex]
