@@ -201,8 +201,8 @@ simplifyPairSeq seq' = newExpr
     _ -> wrap normalised
 
 simplify :: Ord e => Expression e -> Expression e
-simplify (Product seq') = simplifyPairSeq seq'
-simplify (Sum seq') = simplifyPairSeq seq'
+simplify (Product seq') = simplify' $ simplifyPairSeq seq'
+simplify (Sum seq') = simplify' $ simplifyPairSeq seq'
 simplify (Abs e) = simplify' . Abs $ simplify e
 simplify (Signum e) = simplify' . Signum $ simplify e
 simplify e = simplify' e
@@ -214,6 +214,9 @@ simplify' (Signum (ConstantRational r)) = ConstantRational $ signum r
 simplify' (Signum (ConstantFloat f)) = ConstantFloat $ signum f
 simplify' (Diff e sym i) = genericIndex (iterate (diff' sym) e) i
 simplify' (Int e sym) = integrate' sym e
+simplify' expr@(Product seq') = case _psOverall seq' of
+  0 -> 0
+  _ -> expr
 simplify' e = e
 
 rewrite :: Ord e => (Expression e -> Expression e) -> Expression e -> Expression e
@@ -248,10 +251,10 @@ subst from to = simplify . rewrite update
   update e' = if e' == from then to else e'
 
 substSymbols :: (Ord e, Ord f) => (e -> f) -> Expression e -> Expression f
-substSymbols f = expandSymbols  (Symbol . f)
+substSymbols f = expandSymbols (Symbol . f)
 
 expandSymbols :: (Ord e, Ord f) => (e -> Expression f) -> Expression e -> Expression f
-expandSymbols f expr = case expr of
+expandSymbols f expr = simplify $ case expr of
   Symbol s -> f s
   ConstantFloat r -> ConstantFloat r
   ConstantRational r -> ConstantRational r
@@ -270,7 +273,7 @@ expandSymbols f expr = case expr of
     _ -> error "expandSymbols: cannot substitute variable with complex expression"
 
 lagrange :: Ord e => Expression e -> [(Expression e, Expression e)] -> Expression e
-lagrange sym points  = foldl' (+) 0 bases
+lagrange sym points  = simplify $ foldl' (+) 0 bases
   where
   bases = constructBasis <$> [0 .. (length points - 1)]
   constructBasis j = foldl' (*) yj $ map term pointIndices
