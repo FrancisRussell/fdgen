@@ -106,7 +106,9 @@ fieldToCellVariables discretised mesh solve field = (cellVariable:cellVariableDe
   update = findFieldUpdate (FieldLValue (_fieldName field) []) solve
   rhsTensor = _updateRHSDiscrete update
   rhs = Tensor.asScalar rhsTensor
-  numDerivatives = numPreviousTimestepsNeeded update
+  -- For Euler updating, we do not need to know any previous derivatives, but since we don't incorporate
+  -- the derivative directly into the update expression we need to allocate an (unused) derivative.
+  numDerivatives = max (numPreviousTimestepsNeeded update) 1
   cellVariableDerivatives = [cellVariableDerivative n | n <- [0..numDerivatives-1]]
   cellVariable = CellVariable
     { _cellVariableName = _fieldName field
