@@ -92,9 +92,7 @@ instance PrettyPrintable TemporalTerminal
   toDoc t = case t of
     PreviousValue -> toDoc "y0"
     DeltaT -> toDoc "h"
-    PreviousDerivative i -> PrettyPrint.hcat $ toDoc <$> ["f(n-", i', ")"]
-      where
-      i' = show i
+    PreviousDerivative i -> PrettyPrint.hcat $ toDoc <$> ["f(n-", show i, ")"]
 
 data SpatialTerminal
   = SpatialDelta Integer
@@ -590,6 +588,9 @@ computeStaggering first second = assert (length first == length second) zipWith 
     (True, False) -> StaggerNeg
     _ -> StaggerNone
 
+genNabla :: Integer -> Tensor (Expression Terminal -> Expression Terminal)
+genNabla dim = Tensor.constructTensor dim 1 [diff $ Direction dir | dir <- [0 .. dim-1]]
+
 buildTensorRValue :: Mesh -> Parser.FDFL -> Parser.FieldExpr Parser.Identifier -> Tensor (Expression Terminal)
 buildTensorRValue mesh fdfl expr = case expr of
   Parser.FieldTemporalDerivative _ -> error "buildUpdate: Temporal derivative not expected in RHS"
@@ -622,13 +623,9 @@ buildTensorRValue mesh fdfl expr = case expr of
   Parser.FieldTensorElements elements -> Tensor.fromSubTensors $ buildRValue <$> elements
   where
   dimension = _meshDimension mesh
-  nabla :: Tensor (Expression Terminal -> Expression Terminal)
-  nabla = Tensor.generateTensor dimension 1 genNabla
+  nabla = genNabla dimension
   buildRValue = buildTensorRValue mesh fdfl
   genScalar s = Tensor.constructTensor dimension 0 [s]
-  genNabla :: TensorIndex -> (Expression Terminal -> Expression Terminal)
-  genNabla [dim] = genDerivative dim
-  genNabla _ = error "genNabla: called for wrong rank"
   genDerivative :: Integer -> Expression Terminal -> Expression Terminal
   genDerivative dir = diff (Direction dir)
   genLC :: Integer -> Tensor (Expression Terminal)
