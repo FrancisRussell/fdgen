@@ -131,6 +131,7 @@ data Mesh = Mesh
   , _meshDimension :: Integer
   , _meshFields :: [Field]
   , _meshSolves :: [Solve]
+  , _meshGridSpacing :: [Expression DiscreteTerminal]
   } deriving Show
 
 instance PrettyPrintable Mesh
@@ -140,6 +141,7 @@ instance PrettyPrintable Mesh
     , ("dim", toDoc $ _meshDimension mesh)
     , ("fields", vListDoc $ _meshFields mesh)
     , ("solves", vListDoc $ _meshSolves mesh)
+    , ("grid_spacing", hListDoc $ _meshGridSpacing mesh)
     ]
 
 data Field = Field
@@ -275,14 +277,25 @@ instance PrettyPrintable BoundaryCondition
     , ("subdomains", vListDoc $ _bcSubdomains bc)
     ]
 
+isMeshConstant :: Expression DiscreteTerminal -> Bool
+isMeshConstant expr = foldl (&&) True (isConstantSymbol <$> unknowns)
+  where
+  unknowns = Set.toList $ vars expr
+  isConstantSymbol s = case s of
+    FieldDataRef _ _ _ -> False
+    ConstantDataRef _ _ -> True
+
 buildDiscreteForm :: Parser.FDFL -> Discretised
-buildDiscreteForm fdfl = Discretised
+buildDiscreteForm fdfl = discretisedNoMeshes
   { _discretisedMeshes = meshes'
-  , _discretisedLiterals = literals
   }
   where
+  discretisedNoMeshes = Discretised
+    { _discretisedMeshes = error "buildDiscreteForm: _discretisedMeshes not yet populated"
+    , _discretisedLiterals = literals
+    }
   meshes = catMaybes $ maybeBuildMesh <$> Map.elems (Parser.getSymbols fdfl)
-  maybeBuildMesh (Parser.MeshDef meshDef) = Just $ buildMesh fdfl meshDef
+  maybeBuildMesh (Parser.MeshDef meshDef) = Just $ buildMesh discretisedNoMeshes fdfl meshDef
   maybeBuildMesh _ = Nothing
   meshes' = doSpatialDiscretisation <$> scalarizeTensorFields <$> meshes
   maybeBuildLiteral (Parser.NamedLiteralDef literalDef) = Just $ buildLiteral fdfl literalDef
@@ -406,14 +419,15 @@ buildFieldDictionary _ mesh field = Map.fromList
   where
   num_components = (_meshDimension mesh) ^ (_fieldRank field)
 
-buildMesh :: Parser.FDFL -> Parser.Mesh -> Mesh
-buildMesh fdfl parserMesh = mesh
+buildMesh :: Discretised -> Parser.FDFL -> Parser.Mesh -> Mesh
+buildMesh _ fdfl parserMesh = mesh
   where
   meshNoFields = Mesh
     { _meshName = Parser.stringLiteralValue $ Parser._meshName parserMesh
     , _meshDimension = dimension
     , _meshFields = error "buildMesh: fields not yet populated"
     , _meshSolves = error "buildMesh: solves not yet populated"
+    , _meshGridSpacing = buildGridSpacing
     }
   meshFields = (buildField meshNoFields fdfl . Parser.getFieldDef fdfl) <$> (Parser._meshFields parserMesh)
   meshNoSolves = meshNoFields
@@ -427,13 +441,25 @@ buildMesh fdfl parserMesh = mesh
   getSolveDef ident = case Parser.getSymbol fdfl ident of
     Just (Parser.SolveDef solve) -> solve
     _ -> error $ "buildMesh: unknown solve " ++ Parser.identifierValue ident
+  buildGridSpacing = spaceExpressions'
+    where
+    spaceExpressions = makeDiscrete <$> Tensor.asScalar . buildTensorRValue meshNoFields fdfl <$> Parser._meshGridSpacing parserMesh
+    spaceExpressions' = if genericLength spaceExpressions == dimension
+      then validateSpacing <$> spaceExpressions
+      else error $ "Incorrect number of grid spacings given for " ++ show dimension ++ " dimensional mesh"
+    validateSpacing spacing = case isMeshConstant spacing of
+      True -> spacing
+      False -> error $ "Grid spacing expression is not constant across grid: " ++ show spacing
+    makeDiscrete = substSymbols makeDiscreteConstant
+      where
+      makeDiscreteConstant (ConstantRef name idx) = ConstantDataRef name idx
+      makeDiscreteConstant sym = error $ "Unable to convert symbol " ++ show sym ++ " to mesh cell-independent value"
 
 buildLiteral :: Parser.FDFL -> Parser.NamedLiteral -> (String, Rational)
 buildLiteral fdfl namedLiteral = (name, value)
   where
   name = Parser.stringLiteralValue $ Parser._namedLiteralName namedLiteral
   value = Parser._namedLiteralValue namedLiteral
-
 
 buildField :: Mesh -> Parser.FDFL -> Parser.Field -> Field
 buildField mesh _ field = Field
@@ -548,7 +574,7 @@ buildRHSDiscrete mesh solve update = rhs
         relativeStaggering = computeStaggering lhsStaggering fieldStaggering
         stencilExpression = scaleFactor * (foldl (+) 0 terms)
         terms = buildTerm <$> Map.toList (_stencilValues stencil)
-        scaleFactor = foldl (*) (fromInteger 1) (zipWith (^^) [Symbol $ GridSpacing i | i <- [0..]] (_stencilScalingPowers stencil))
+        scaleFactor = foldl (*) (fromInteger 1) (zipWith (^^) (_meshGridSpacing mesh) (_stencilScalingPowers stencil))
         buildTerm (index, coeff) = (fromRational coeff) * (Symbol $ FieldDataRef name tensorIndex index)
         stencilSpec = StencilSpec
           { _stencilSpecOrder = order

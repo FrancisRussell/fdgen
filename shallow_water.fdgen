@@ -15,5 +15,4 @@ HeightBC = BoundaryCondition(Dn(h), 0)
 TimeStep = Solve(name="step", spatial_order=1, temporal_order=3, equations=[VelocityEq, HeightEq], 
   boundary_conditions=[VelocityBC_H, VelocityBC_V, HeightBC])
 
-m = Mesh(name="shallow_water", dimension=2, fields=[u, h], solves=[TimeStep])
-
+m = Mesh(name="shallow_water", dimension=2, fields=[u, h], solves=[TimeStep], grid_spacing=[hx, hy])

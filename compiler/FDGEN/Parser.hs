@@ -42,11 +42,12 @@ stringLiteralValue (StringLiteral v) = v
 identifierValue :: Identifier -> String
 identifierValue (Identifier v) = v
 
-data Mesh = Mesh {
-  _meshName :: StringLiteral,
-  _meshDimension :: Integer,
-  _meshFields :: [Identifier],
-  _meshSolves :: [Identifier]
+data Mesh = Mesh
+  { _meshName :: StringLiteral
+  , _meshDimension :: Integer
+  , _meshFields :: [Identifier]
+  , _meshSolves :: [Identifier]
+  , _meshGridSpacing :: [FieldExpr Identifier]
 } deriving Show
 
 instance PrettyPrintable Mesh
@@ -56,6 +57,7 @@ instance PrettyPrintable Mesh
     , ("dim", toDoc $ _meshDimension mesh)
     , ("fields", hListDoc $ _meshFields mesh)
     , ("solves", hListDoc $ _meshSolves mesh)
+    , ("grid_spacing", hListDoc $ _meshGridSpacing mesh)
     ]
 
 data Field = Field {
@@ -322,6 +324,7 @@ isFieldLike = validateDefinition validate "field"
                          MeshConstantDef _ -> True
                          NamedLiteralDef _ -> True
                          _ -> False
+
 isSolve :: Validator Identifier
 isSolve = validateDefinition validate "solve"
   where validate def = case def of
@@ -365,6 +368,7 @@ parseMesh = ObjectParseSpec "Mesh" []
   , buildAttributeSpec "dimension" True alwaysValid meshDimension
   , buildAttributeSpec "fields" True (validateList isFieldLike >=> noDuplicates) meshFields
   , buildAttributeSpec "solves" True (validateList isSolve >=> noDuplicates) meshSolves
+  , buildAttributeSpec "grid_spacing" True alwaysValid meshGridSpacing
   ]
 
 parseEquation :: ObjectParseSpec Equation
@@ -469,6 +473,7 @@ instance FDFLObject Mesh where
     , _meshDimension = error "undefined meshDimension"
     , _meshFields = []
     , _meshSolves = []
+    , _meshGridSpacing = []
     }
 
 instance FDFLObject Equation where
