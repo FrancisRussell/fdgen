@@ -319,11 +319,11 @@ constantFoldDiscretised d = d
     { _solveUpdates = updateUpdate mesh solve <$> _solveUpdates solve
     , _solveBoundaryConditions = updateBC mesh solve <$> _solveBoundaryConditions solve
     }
-  updateUpdate mesh solve update = update
+  updateUpdate _mesh _solve update = update
     { _updateRHS = substTerminals <$> _updateRHS update
     , _updateRHSDiscrete = substDiscreteTerminals <$> _updateRHSDiscrete update
     }
-  updateBC mesh solve bc = bc
+  updateBC _mesh _solve bc = bc
     { _bcRHS = substTerminals <$> _bcRHS bc
     }
   substTerminals = substLiterals (_discretisedLiterals d) (\name -> ConstantRef name [])
@@ -354,7 +354,7 @@ scalarizeTensorFields m = updateMesh m
     { _meshFields = updateField mesh `concatMap` _meshFields mesh
     , _meshSolves = updateSolve mesh <$> _meshSolves mesh
     }
-  updateField mesh field = [genScalarField field suffix staggering | (staggering, suffix) <- zip (_fieldStaggerSpatial field) suffixes]
+  updateField _mesh field = [genScalarField field suffix staggering | (staggering, suffix) <- zip (_fieldStaggerSpatial field) suffixes]
     where
     rank = _fieldRank field
     suffixes = genIndices [] rank
@@ -367,7 +367,7 @@ scalarizeTensorFields m = updateMesh m
     { _solveUpdates = updateUpdate mesh solve `concatMap` _solveUpdates solve
     , _solveBoundaryConditions = updateBC mesh solve `concatMap` _solveBoundaryConditions solve
     }
-  updateUpdate mesh solve update = [genScalarUpdate update index | index <- suffixes]
+  updateUpdate mesh _solve update = [genScalarUpdate update index | index <- suffixes]
     where
     FieldTemporalDerivative (FieldLValue fieldName idx) degree = _updateLHS update
     field = meshGetField mesh fieldName
@@ -382,14 +382,14 @@ scalarizeTensorFields m = updateMesh m
       rhsIndex = genericDrop (rank - rhsRank) index
       rhsValue = Tensor.getElement (_updateRHS u) rhsIndex
       rhsValue' = substSymbols flattenTerminal rhsValue
-  updateBC mesh solve bc = [genScalarBC bc index | index <- suffixes]
+  updateBC mesh _solve bc = [genScalarBC index | index <- suffixes]
     where
     (FieldLValue fieldName idx) = _bcField bc
     field = meshGetField mesh fieldName
     rank = _fieldRank field
     rhsRank = rank - genericLength idx
     suffixes = genIndices idx rank
-    genScalarBC bc index = bc
+    genScalarBC index = bc
       { _bcField = FieldLValue (genFlattenedName fieldName index) []
       , _bcRHS = Tensor.generateTensor dim 0 (const rhsValue)
       }
@@ -454,7 +454,7 @@ buildMesh _ fdfl parserMesh = mesh
       makeDiscreteConstant sym = error $ "Unable to convert symbol " ++ show sym ++ " to mesh cell-independent value"
 
 buildLiteral :: Parser.FDFL -> Parser.NamedLiteral -> (String, Rational)
-buildLiteral fdfl namedLiteral = (name, value)
+buildLiteral _fdfl namedLiteral = (name, value)
   where
   name = Parser.stringLiteralValue $ Parser._namedLiteralName namedLiteral
   value = Parser._namedLiteralValue namedLiteral

@@ -2,7 +2,7 @@ module FDGEN.CppBackend (CppBackend(..)) where
 import FDGEN.Backend(Backend(..))
 import System.IO (hPutStrLn, stderr)
 import System.Exit (exitFailure)
-import FDGEN.Discrete (Discretised, buildTemplateDictionary)
+import FDGEN.Discrete (buildTemplateDictionary)
 import qualified FDGEN.Template as Template
 
 data CppBackend = CppBackend

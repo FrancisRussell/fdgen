@@ -85,7 +85,7 @@ fromSubTensors elements = case genericLength elements == dimension of
 checkIdentical :: Ord e => [e] -> Maybe e
 checkIdentical elems = case Set.toList $ Set.fromList elems of
   [] -> Nothing
-  [elem] -> Just elem
+  [element] -> Just element
   _ -> Nothing
 
 instance Functor Tensor where

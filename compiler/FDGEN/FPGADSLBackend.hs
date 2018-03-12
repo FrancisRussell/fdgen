@@ -9,7 +9,6 @@ import FDGEN.Discrete ( Discretised(..), Mesh(..), Field(..), Solve(..)
 import FDGEN.Algebra (Expression(..), PairSeq(..))
 import Control.Applicative ((<$>))
 import Data.Ratio (numerator, denominator)
-import Text.PrettyPrint (Doc)
 import FDGEN.Precedence (PDoc, pDoc, renderInfix, renderTerminal, Precedence(..), Assoc(..), renderPrefix, renderPrefixMultiParam)
 import FDGEN.Pretty (PrettyPrintable(..))
 import qualified FDGEN.Template as Template
@@ -28,7 +27,7 @@ data CellVariable = CellVariable
   } deriving Show
 
 renderDSLExpr :: DSLExpr -> String
-renderDSLExpr expr = prettyPrint . pDoc $ renderDSLExpr' expr
+renderDSLExpr = prettyPrint . pDoc . renderDSLExpr'
   where
   renderDSLExpr' expr = case expr of
     DSLAdd a b -> renderInfix (" + ", PrecLevel 6, LeftAssoc) (renderDSLExpr' a) (renderDSLExpr' b)
@@ -36,12 +35,12 @@ renderDSLExpr expr = prettyPrint . pDoc $ renderDSLExpr' expr
     DSLMult a b -> renderInfix (" * ", PrecLevel 7, LeftAssoc) (renderDSLExpr' a) (renderDSLExpr' b)
     DSLDiv a b -> renderInfix (" / ", PrecLevel 7, LeftAssoc) (renderDSLExpr' a) (renderDSLExpr' b)
     DSLNegate  e -> renderPrefix ("-", PrecLevel 6) (renderDSLExpr' e)
-    DSLIntPower expr i -> renderApplication "IntPower" [renderDSLExpr' expr, renderNum i]
+    DSLIntPower e i -> renderApplication "IntPower" [renderDSLExpr' e, renderNum i]
     DSLCellVariable name -> renderTerminal name
-    DSLConstant name expr -> renderApplication "Constant" [renderTerminal name, renderDSLExpr' expr]
+    DSLConstant name e -> renderApplication "Constant" [renderTerminal name, renderDSLExpr' e]
     DSLInt i -> renderNum i
     DSLDouble d -> renderNum d
-    DSLOffset expr x y -> renderApplication "Offset" [renderDSLExpr' expr, renderNum x, renderNum y]
+    DSLOffset e x y -> renderApplication "Offset" [renderDSLExpr' e, renderNum x, renderNum y]
     DSLCurrent e -> renderApplication "Current" [renderDSLExpr' e]
     DSLCos e -> renderApplication "cos" [renderDSLExpr' e]
     DSLSin e -> renderApplication "sin" [renderDSLExpr' e]
@@ -101,7 +100,7 @@ getDerivativeName :: String -> Integer -> String
 getDerivativeName name d = name ++ "_dt" ++ show d
 
 fieldToCellVariables :: Discretised -> Mesh -> Solve -> Field -> [CellVariable]
-fieldToCellVariables discretised mesh solve field = (cellVariable:cellVariableDerivatives)
+fieldToCellVariables _discretised _mesh solve field = (cellVariable:cellVariableDerivatives)
   where
   update = findFieldUpdate (FieldLValue (_fieldName field) []) solve
   rhsTensor = _updateRHSDiscrete update
@@ -122,11 +121,12 @@ fieldToCellVariables discretised mesh solve field = (cellVariable:cellVariableDe
 buildDSLExpr :: Expression DiscreteTerminal -> DSLExpr
 buildDSLExpr expr = case expr of
   Symbol s -> case s of
-    FieldDataRef name idx offsets  -> case offsets of
+    FieldDataRef name [] offsets  -> case offsets of
       [0, 0] -> DSLCellVariable name
       [x, y] -> DSLOffset (DSLCellVariable name) (fromIntegral x) (fromIntegral y)
-      _ -> error $ "Expected 2D stencil offset expression: " ++ show offsets
-    ConstantDataRef name idx -> DSLConstant name 0
+      _ -> error $ "Expected 2D stencil offset expression: " ++ show s
+    ConstantDataRef _ _ -> error $ "No non-literal constants expected in FPGA backend (was constant folding applied?): " ++ show s
+    FieldDataRef _ _ _  -> error $ "Expected no indices for field index expression (were tensor fields scalarized?): " ++ show s
   Sum seq' -> buildPairSeq (0, (+)) (1, \a b -> a * (buildDSLExpr $ ConstantRational b)) seq'
   Product seq' -> buildPairSeq (1, (*)) (1, raiseInt) seq'
   ConstantFloat f -> DSLDouble f
