@@ -5,7 +5,7 @@ import System.Exit (exitFailure)
 import FDGEN.Discrete ( Discretised(..), Mesh(..), Field(..), Solve(..)
                       , FieldLValue(..), findFieldUpdate
                       , numPreviousTimestepsNeeded, DiscreteTerminal(..)
-                      , Update(..))
+                      , Update(..), constantFoldDiscretised)
 import FDGEN.Algebra (Expression(..), PairSeq(..))
 import Control.Applicative ((<$>))
 import Data.Ratio (numerator, denominator)
@@ -173,4 +173,5 @@ instance Backend FPGADSLBackend
       Left err -> hPutStrLn stderr (show err) >> exitFailure
       Right generated -> putStrLn generated
     where
-    context = generateContext discreteForm
+    discreteForm' = constantFoldDiscretised discreteForm
+    context = generateContext discreteForm'

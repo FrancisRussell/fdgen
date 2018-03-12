@@ -30,6 +30,9 @@ instance PrettyPrintable Integer where
 instance PrettyPrintable Bool where
   toDoc = text . show
 
+instance PrettyPrintable Rational where
+  toDoc = double . fromRational
+
 structureDoc :: String -> [(String, Doc)] -> Doc
 structureDoc name fields = text name $+$ text "{" $+$ nest 2 fieldsDoc $+$ text "}"
   where

@@ -1,6 +1,7 @@
 module FDGEN.Discrete (buildDiscreteForm, buildTemplateDictionary
                       , Discretised(..), Mesh(..), Field(..), Solve(..), findFieldUpdate, FieldLValue(..)
-                      , numPreviousTimestepsNeeded, DiscreteTerminal(..), Update(..)) where
+                      , numPreviousTimestepsNeeded, DiscreteTerminal(..), Update(..)
+                      , scalarizeTensorFields, constantFoldDiscretised) where
 import FDGEN.Algebra (Expression(..), diff, adamsBashforthGeneral, expandSymbols, substSymbols, rewriteFixedPoint, vars)
 import FDGEN.Tensor (Tensor, TensorIndex)
 import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, vListDoc)
@@ -110,21 +111,20 @@ instance PrettyPrintable SpatialTerminal
     FieldValue idx -> toDoc $ "y" ++ show idx
     Position i -> toDoc $ "x" ++ show i
 
-data FieldAccess = FieldAccess {
-  _fieldAccessName :: String,
-  _fieldAccessTemporalIndex :: Integer,
-  _fieldAccessSpatialOffsets :: [Integer]
-} deriving Show
-
-data Discretised = Discretised {
-  _discretisedMeshes :: [Mesh]
-} deriving Show
+data Discretised = Discretised
+  { _discretisedLiterals :: Map String Rational
+  , _discretisedMeshes :: [Mesh]
+  } deriving Show
 
 instance PrettyPrintable Discretised
   where
   toDoc discrete = structureDoc "Discretised"
-    [ ("meshes", vListDoc $ _discretisedMeshes discrete)
+    [ ("literals", structureDoc "Map" literalEntries)
+    , ("meshes", vListDoc $ _discretisedMeshes discrete)
     ]
+    where
+    literalEntries = transformEntry <$> Map.assocs (_discretisedLiterals discrete)
+    transformEntry (name, value) = (show name, toDoc value)
 
 data Mesh = Mesh
   { _meshName :: String
@@ -276,12 +276,18 @@ instance PrettyPrintable BoundaryCondition
     ]
 
 buildDiscreteForm :: Parser.FDFL -> Discretised
-buildDiscreteForm fdfl = Discretised { _discretisedMeshes = meshes' }
+buildDiscreteForm fdfl = Discretised
+  { _discretisedMeshes = meshes'
+  , _discretisedLiterals = literals
+  }
   where
   meshes = catMaybes $ maybeBuildMesh <$> Map.elems (Parser.getSymbols fdfl)
   maybeBuildMesh (Parser.MeshDef meshDef) = Just $ buildMesh fdfl meshDef
   maybeBuildMesh _ = Nothing
   meshes' = doSpatialDiscretisation <$> scalarizeTensorFields <$> meshes
+  maybeBuildLiteral (Parser.NamedLiteralDef literalDef) = Just $ buildLiteral fdfl literalDef
+  maybeBuildLiteral _ = Nothing
+  literals = Map.fromList . catMaybes $ maybeBuildLiteral <$> Map.elems (Parser.getSymbols fdfl)
 
 doSpatialDiscretisation :: Mesh -> Mesh
 doSpatialDiscretisation = updateMesh
@@ -289,6 +295,35 @@ doSpatialDiscretisation = updateMesh
   updateMesh mesh = mesh { _meshSolves = updateSolve mesh <$> _meshSolves mesh }
   updateSolve mesh solve = solve { _solveUpdates = updateUpdate mesh solve <$> _solveUpdates solve }
   updateUpdate mesh solve update = update { _updateRHSDiscrete = buildRHSDiscrete mesh solve update }
+
+constantFoldDiscretised :: Discretised -> Discretised
+constantFoldDiscretised d = d
+  { _discretisedMeshes = updateMesh <$> _discretisedMeshes d
+  }
+  where
+  updateMesh mesh = mesh
+    { _meshSolves = updateSolve mesh <$> _meshSolves mesh
+    }
+  updateSolve mesh solve = solve
+    { _solveUpdates = updateUpdate mesh solve <$> _solveUpdates solve
+    , _solveBoundaryConditions = updateBC mesh solve <$> _solveBoundaryConditions solve
+    }
+  updateUpdate mesh solve update = update
+    { _updateRHS = substTerminals <$> _updateRHS update
+    , _updateRHSDiscrete = substDiscreteTerminals <$> _updateRHSDiscrete update
+    }
+  updateBC mesh solve bc = bc
+    { _bcRHS = substTerminals <$> _bcRHS bc
+    }
+  substTerminals = substLiterals (_discretisedLiterals d) (\name -> ConstantRef name [])
+  substDiscreteTerminals = substLiterals (_discretisedLiterals d) (\name -> ConstantDataRef name [])
+  substLiterals :: Ord e => (Map String Rational) -> (String -> e) -> Expression e -> Expression e
+  substLiterals values constructor = expandSymbols expandSymbol
+    where
+    expandSymbol s = case Map.lookup s mappedSymbols of
+      Just value -> ConstantRational value
+      Nothing -> Symbol s
+    mappedSymbols = Map.mapKeys constructor values
 
 scalarizeTensorFields :: Mesh -> Mesh
 scalarizeTensorFields m = updateMesh m
@@ -392,6 +427,13 @@ buildMesh fdfl parserMesh = mesh
   getSolveDef ident = case Parser.getSymbol fdfl ident of
     Just (Parser.SolveDef solve) -> solve
     _ -> error $ "buildMesh: unknown solve " ++ Parser.identifierValue ident
+
+buildLiteral :: Parser.FDFL -> Parser.NamedLiteral -> (String, Rational)
+buildLiteral fdfl namedLiteral = (name, value)
+  where
+  name = Parser.stringLiteralValue $ Parser._namedLiteralName namedLiteral
+  value = Parser._namedLiteralValue namedLiteral
+
 
 buildField :: Mesh -> Parser.FDFL -> Parser.Field -> Field
 buildField mesh _ field = Field
@@ -550,6 +592,7 @@ buildTensorRValue mesh fdfl expr = case expr of
         where
         constructor name index = Function (FieldRef name index) directions
     Just (Parser.FieldExprDef def) -> buildRValue def
+    Just (Parser.NamedLiteralDef def) -> genScalar . Symbol $ ConstantRef (Parser.stringLiteralValue $ Parser._namedLiteralName def) []
     Just _ -> error $ "buildTensorRValue: unable to treat symbol as field: " ++ Parser.identifierValue ref
     Nothing -> error $ "buildTensorRValue: unknown symbol " ++ Parser.identifierValue ref
   Parser.FieldTensorElements elements -> Tensor.fromSubTensors $ buildRValue <$> elements

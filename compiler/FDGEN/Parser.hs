@@ -4,7 +4,7 @@ module FDGEN.Parser ( parseInput, FDFL, getSymbols, Definition(..)
                     , getSymbol, Field(..), Solve(..), Equation(..)
                     , FieldExpr(..), getFieldDef, LiteralConstant(..)
                     , MeshConstant(..), Identifier(..), StaggerStrategy(..)
-                    , BoundaryCondition(..)) where
+                    , BoundaryCondition(..), NamedLiteral(..)) where
 import Data.Char (toLower)
 import Data.Map (Map)
 import Data.Maybe (isJust)
@@ -127,6 +127,18 @@ data LiteralConstant
   | PermutationSymbol
   deriving Show
 
+data NamedLiteral = NamedLiteral
+  { _namedLiteralName :: StringLiteral
+  , _namedLiteralValue :: Rational
+  } deriving Show
+
+instance PrettyPrintable NamedLiteral
+ where
+ toDoc literal = structureDoc "NamedLiteral"
+   [ ("name", toDoc $ _namedLiteralName literal)
+   , ("value", toDoc  ((fromRational $ _namedLiteralValue literal)::Double))
+   ]
+
 data MeshConstant = MeshConstant {
   _meshConstantRank :: Integer,
   _meshConstantName :: StringLiteral
@@ -188,6 +200,7 @@ data Definition
  | EquationDef Equation
  | BoundaryConditionDef BoundaryCondition
  | MeshConstantDef MeshConstant
+ | NamedLiteralDef NamedLiteral
  | FieldExprDef (FieldExpr Identifier)
  | SolveDef Solve
  deriving Show
@@ -200,6 +213,7 @@ instance PrettyPrintable Definition
    EquationDef e -> toDoc e
    BoundaryConditionDef bc -> toDoc bc
    MeshConstantDef c -> toDoc c
+   NamedLiteralDef l -> toDoc l
    FieldExprDef f -> toDoc  f
    SolveDef s -> toDoc s
 
@@ -234,6 +248,7 @@ Lens.makeLenses ''Equation
 Lens.makeLenses ''MeshConstant
 Lens.makeLenses ''Solve
 Lens.makeLenses ''BoundaryCondition
+Lens.makeLenses ''NamedLiteral
 
 emptyFDFL :: FDFL
 emptyFDFL = FDFL {
@@ -297,7 +312,7 @@ validateDefinition validate friendlyType name = do
     Nothing -> parserFail $ "Unknown identifier " ++ identifierValue name
     Just def -> if validate def
       then return $ name
-      else parserFail $ identifierValue name ++ "should be of type " ++ friendlyType ++ " but is not."
+      else parserFail $ identifierValue name ++ " should be of type " ++ friendlyType ++ " but is not."
 
 isFieldLike :: Validator Identifier
 isFieldLike = validateDefinition validate "field"
@@ -305,6 +320,7 @@ isFieldLike = validateDefinition validate "field"
                          FieldDef _ -> True
                          FieldExprDef _ -> True
                          MeshConstantDef _ -> True
+                         NamedLiteralDef _ -> True
                          _ -> False
 isSolve :: Validator Identifier
 isSolve = validateDefinition validate "solve"
@@ -371,6 +387,13 @@ parseMeshConstant = ObjectParseSpec "MeshConstant"
   []
   [ buildAttributeSpec "name" True alwaysValid meshConstantName
   , buildAttributeSpec "rank" False alwaysValid meshConstantRank
+  ]
+
+parseNamedLiteral :: ObjectParseSpec NamedLiteral
+parseNamedLiteral = ObjectParseSpec "NamedLiteral"
+  []
+  [ buildAttributeSpec "name" True alwaysValid namedLiteralName
+  , buildAttributeSpec "value" True alwaysValid namedLiteralValue
   ]
 
 parseSolve :: ObjectParseSpec Solve
@@ -470,6 +493,13 @@ instance FDFLObject MeshConstant where
     , _meshConstantRank = 0
     }
 
+instance FDFLObject NamedLiteral where
+  wrapObject = NamedLiteralDef
+  emptyObject = NamedLiteral
+    { _namedLiteralName = error "undefined namedLiteralName"
+    , _namedLiteralValue = error "undefined namedLiteralValue"
+    }
+
 instance FDFLObject Solve where
   wrapObject = SolveDef
   emptyObject = Solve
@@ -558,6 +588,12 @@ instance FDFLParsable StringLiteral where
 instance FDFLParsable Identifier where
   parse = Identifier <$> parseIdentifier
 
+instance FDFLParsable Rational where
+  parse = choice
+    [ realToFrac <$> try parseFloat
+    , realToFrac <$> parseInteger
+    ]
+
 instance FDFLParsable Integer where
   parse = parseInteger
 
@@ -642,6 +678,7 @@ parseDefinition = choice
   , parseSpecToParser parseBoundaryCondition
   , parseSpecToParser parseMeshConstant
   , parseSpecToParser parseSolve
+  , parseSpecToParser parseNamedLiteral
   , FieldExprDef <$> parse
   ]
 

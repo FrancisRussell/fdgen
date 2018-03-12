@@ -23,6 +23,7 @@ processFile filename = do
     case result of
       Left err -> hPutStrLn stderr (show err) >> exitFailure
       Right spec -> (putStrLn $ prettyPrint spec) >>
+                    (putStrLn $ prettyPrint discreteForm) >>
                     processDiscretised CppBackend discreteForm >>
                     processDiscretised FPGADSLBackend discreteForm
                     where
