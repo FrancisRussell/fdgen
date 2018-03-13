@@ -20,6 +20,7 @@ data TemplateElement
   = Text String
   | Lookup Path
   | ForEach String Path [TemplateElement]
+  | IfPresent String Path [TemplateElement]
   deriving Show
 
 data Val
@@ -92,7 +93,7 @@ dictLookup = Map.lookup
 templateDef :: LanguageDef st
 templateDef = emptyDef
   { caseSensitive = True
-  , reservedNames = ["for", "end", "in"]
+  , reservedNames = ["for", "end", "in", "is", "ifpresent"]
   , identStart = letter
   }
 
@@ -129,8 +130,9 @@ parseDirectiveWrapper contentParser = do
 
 parseDirective :: TemplateElementParser
 parseDirective = choice
-  [ parseFor,
-    parseLookup
+  [ parseFor
+  , parseIfPresent
+  , parseLookup
   ]
 
 parsePath :: Parsec String TemplateParseState Path
@@ -153,6 +155,20 @@ parseFor = do
     parseReserved "for"
     ident <- parseIdentifier
     parseReserved "in"
+    path <- parsePath
+    return (ident, path)
+
+parseIfPresent :: TemplateElementParser
+parseIfPresent = do
+  (ident, path) <- parseDirectiveWrapper parseSpecial
+  block <- parseBlock
+  parseEnd
+  return $ IfPresent ident path block
+  where
+  parseSpecial = do
+    parseReserved "ifpresent"
+    ident <- parseIdentifier
+    parseReserved "is"
     path <- parsePath
     return (ident, path)
 
@@ -196,6 +212,14 @@ populateTemplate dict template = _sbResult <$> foldM populateTemplate' initial t
       where
       sb' = pushScope (Map.fromList [(binding, val)]) sb
       sb'' = foldM populateTemplate' sb' elements
+  populateTemplate' builder (IfPresent binding path body) =
+    case scopeLookupPath path builder of
+      Left _ -> return builder
+      Right val -> popScope <$> sb''
+        where
+          sb' = pushScope (Map.fromList [(binding, val)]) builder
+          sb'' = foldM populateTemplate' sb' body
+
 
 populate :: Dict -> String -> Either String String
 populate dict template = populatedTemplate

@@ -25,6 +25,7 @@ data Context = Context
 data CellVariable = CellVariable
   { _cellVariableName :: String
   , _cellVariableExpr :: DSLExpr
+  , _cellVariableInitialExpr :: Maybe (Integer, DSLExpr)
   } deriving Show
 
 renderDSLExpr :: DSLExpr -> String
@@ -122,21 +123,26 @@ fieldToCellVariables _discretised _mesh solve field = (cellVariable:cellVariable
   update = findFieldUpdate (FieldLValue (_fieldName field) []) solve
   rhsTensor = _updateRHSDiscrete update
   rhs = Tensor.asScalar rhsTensor
+  maxTemporalOrder = maxTimestepOrder update
   -- For Euler updating, we do not need to know any previous derivatives, but since we don't incorporate
   -- the derivative directly into the update expression we need to allocate an (unused) derivative.
-  maxTemporalOrder = maxTimestepOrder update
-  numDerivatives = max (numPreviousTimestepsNeeded update maxTemporalOrder) 1
+  numDerivativesNeeded = numPreviousTimestepsNeeded update maxTemporalOrder
+  numDerivativesStored = max numDerivativesNeeded 1
   name = _fieldName field
-  cellVariableDerivatives = [cellVariableDerivative n | n <- [0..numDerivatives-1]]
+  cellVariableDerivatives = [cellVariableDerivative n | n <- [0..numDerivativesStored-1]]
   cellVariable = CellVariable
     { _cellVariableName = name
     , _cellVariableExpr = generateTimestepping solve update name maxTemporalOrder
+    , _cellVariableInitialExpr = if numDerivativesNeeded == 0
+      then Nothing
+      else Just (numDerivativesNeeded, generateTimestepping solve update name 1)
     }
   cellVariableDerivative n = CellVariable
     { _cellVariableName = getDerivativeName name n
     , _cellVariableExpr = if n == 0
       then buildDSLExpr expandDiscreteTerminal rhs
       else getPreviousDerivative name n
+    , _cellVariableInitialExpr = Nothing
     }
 
 expandDiscreteTerminal :: DiscreteTerminal -> Expression DSLExpr
@@ -188,12 +194,20 @@ buildDictionary context =
   fieldDictionaries = buildCellVariableDictionary <$> _contextCellVariables context
 
 buildCellVariableDictionary :: CellVariable -> Template.Dict
-buildCellVariableDictionary cellVariable = Map.fromList
+buildCellVariableDictionary cellVariable = Map.fromList $
   [ ("name", Template.StringVal name)
   , ("update", Template.StringVal . renderDSLExpr $ _cellVariableExpr cellVariable)
-  ]
+  ] ++ initial
   where
   name = _cellVariableName cellVariable
+  initial = case _cellVariableInitialExpr cellVariable of
+    Nothing -> []
+    Just (count, expr) -> [("initial", initialMap)]
+      where
+      initialMap = Template.DictVal $ Map.fromList
+        [ ("count", Template.StringVal $ show count)
+        , ("expression", Template.StringVal $ renderDSLExpr expr)
+        ]
 
 instance Backend FPGADSLBackend
   where
