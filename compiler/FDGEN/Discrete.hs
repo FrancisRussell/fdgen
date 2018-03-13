@@ -1,7 +1,8 @@
 module FDGEN.Discrete (buildDiscreteForm, buildTemplateDictionary
                       , Discretised(..), Mesh(..), Field(..), Solve(..), findFieldUpdate, FieldLValue(..)
                       , numPreviousTimestepsNeeded, DiscreteTerminal(..), Update(..)
-                      , scalarizeTensorFields, constantFoldDiscretised) where
+                      , scalarizeTensorFields, constantFoldDiscretised
+                      , maxTimestepOrder, getTimestepping, TemporalTerminal(..)) where
 import FDGEN.Algebra (Expression(..), diff, adamsBashforthGeneral, expandSymbols, substSymbols, rewriteFixedPoint, vars)
 import FDGEN.Tensor (Tensor, TensorIndex)
 import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, vListDoc)
@@ -658,10 +659,18 @@ findLValue mesh fdfl expr = case expr of
   getFieldName = Parser.stringLiteralValue . Parser._fieldName . Parser.getFieldDef fdfl
   getFieldRank = _fieldRank . meshGetField mesh . getFieldName
 
-numPreviousTimestepsNeeded :: Update -> Integer
-numPreviousTimestepsNeeded update = foldl max 0 unknownsDerivatives
+maxTimestepOrder :: Update -> Integer
+maxTimestepOrder update = Map.foldrWithKey (\k _ b -> max k b) 0 (_updateTimeSteppingSchemes update)
+
+getTimestepping :: Update -> Integer -> Maybe (Expression TemporalTerminal)
+getTimestepping update order = Map.lookup order (_updateTimeSteppingSchemes update)
+
+numPreviousTimestepsNeeded :: Update -> Integer -> Integer
+numPreviousTimestepsNeeded update order = foldl max 0 unknownsDerivatives
   where
-  unknowns = Set.toList $ Map.foldl (\a b -> Set.union a (vars b)) Set.empty (_updateTimeSteppingSchemes update)
+  unknowns = case Map.lookup order (_updateTimeSteppingSchemes update) of
+    Just expr -> Set.toList $ vars expr
+    Nothing -> error $ "numPreviousTimestepsNeeded: missing expression for order-" ++ show order ++ " timestepping."
   unknownsDerivatives = catMaybes $ derivativeOff <$> unknowns
   derivativeOff sym = case sym of
     PreviousDerivative n -> Just n
