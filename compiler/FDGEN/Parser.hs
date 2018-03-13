@@ -109,7 +109,7 @@ instance PrettyPrintable a => PrettyPrintable (FieldExpr a)
     FieldSpatialDerivative a i -> function "diff" [toDoc a, dim i]
     FieldTemporalDerivative a -> function "dt" [a]
     FieldNormalDerivative a -> function "dn" [a]
-    FieldLiteral (ScalarConstant r) -> PrettyPrint.double r
+    FieldLiteral (ScalarConstant r) -> PrettyPrint.double $ fromRational r
     FieldLiteral PermutationSymbol -> text "epsilon"
     FieldIndexOperation indices a -> hcat [toDoc a , hListDoc indices]
     FieldTensorElements elements -> hcat [text "[", printList elements, text "]"]
@@ -125,7 +125,7 @@ instance PrettyPrintable a => PrettyPrintable (FieldExpr a)
         suffix = text ")"
 
 data LiteralConstant
-  = ScalarConstant Double
+  = ScalarConstant Rational
   | PermutationSymbol
   deriving Show
 
@@ -569,7 +569,7 @@ instance FDFLParsable (FieldExpr Identifier) where
         , Infix (parseSymbol "-" >> return (\a -> FieldAddition a . negate')) AssocLeft
         ]
       ]
-    negate' = FieldOuter . FieldLiteral . ScalarConstant $ -1.0
+    negate' = FieldOuter . FieldLiteral . ScalarConstant $ (-1)
     parseIndices = parseBrackets $ parseCommaSep parseInteger
     parseExpressionList = parseBrackets $ parseCommaSep expr
 
@@ -600,7 +600,7 @@ instance FDFLParsable Identifier where
 instance FDFLParsable Rational where
   parse = choice
     [ realToFrac <$> try parseFloat
-    , realToFrac <$> parseInteger
+    , fromInteger <$> parseInteger
     ]
 
 instance FDFLParsable Integer where
@@ -609,8 +609,7 @@ instance FDFLParsable Integer where
 instance FDFLParsable LiteralConstant where
   parse = choice
     [ parseNullary "Permutation" PermutationSymbol
-    , ScalarConstant <$> try parseFloat
-    , ScalarConstant <$> (fromIntegral <$> parseInteger)
+    , ScalarConstant <$> parse
     ]
     where
     parseNullary name constructor =

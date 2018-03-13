@@ -273,7 +273,7 @@ expandSymbols f expr = simplify $ case expr of
     _ -> error "expandSymbols: cannot substitute variable with complex expression"
 
 lagrange :: Ord e => Expression e -> [(Expression e, Expression e)] -> Expression e
-lagrange sym points  = simplify $ foldl' (+) 0 bases
+lagrange sym points = foldl' (+) 0 bases
   where
   bases = constructBasis <$> [0 .. (length points - 1)]
   constructBasis j = foldl' (*) yj $ map term pointIndices

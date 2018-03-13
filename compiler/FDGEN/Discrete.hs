@@ -613,7 +613,7 @@ buildTensorRValue mesh fdfl expr = case expr of
   Parser.FieldSpatialDerivative t i -> genDerivative i <$> (buildRValue t)
   Parser.FieldIndexOperation i t -> genScalar $ Tensor.getElement (buildRValue t) i
   Parser.FieldLiteral literal -> case literal of
-    Parser.ScalarConstant s -> Tensor.constructTensor dimension 0 [ConstantFloat s]
+    Parser.ScalarConstant r -> Tensor.constructTensor dimension 0 [ConstantRational r]
     Parser.PermutationSymbol -> genLC dimension
   Parser.FieldRef ref -> case Parser.getSymbol fdfl ref of
     Just (Parser.MeshConstantDef constant) ->
