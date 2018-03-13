@@ -99,6 +99,11 @@ buildCellVariables discretised mesh solve =
 getDerivativeName :: String -> Integer -> String
 getDerivativeName name d = name ++ "_dt" ++ show d
 
+getPreviousDerivative :: String -> Integer -> DSLExpr
+getPreviousDerivative name offset = case offset of
+  0 -> DSLCurrent . DSLCellVariable $ getDerivativeName name 0
+  _ -> DSLCellVariable$ getDerivativeName name (offset - 1)
+
 fieldToCellVariables :: Discretised -> Mesh -> Solve -> Field -> [CellVariable]
 fieldToCellVariables _discretised _mesh solve field = (cellVariable:cellVariableDerivatives)
   where
@@ -108,14 +113,15 @@ fieldToCellVariables _discretised _mesh solve field = (cellVariable:cellVariable
   -- For Euler updating, we do not need to know any previous derivatives, but since we don't incorporate
   -- the derivative directly into the update expression we need to allocate an (unused) derivative.
   numDerivatives = max (numPreviousTimestepsNeeded update) 1
+  name = _fieldName field
   cellVariableDerivatives = [cellVariableDerivative n | n <- [0..numDerivatives-1]]
   cellVariable = CellVariable
     { _cellVariableName = _fieldName field
     , _cellVariableExpr = DSLDouble 0.0
     }
   cellVariableDerivative n = CellVariable
-    { _cellVariableName = getDerivativeName (_fieldName field) n
-    , _cellVariableExpr = if n == 0 then buildDSLExpr rhs else DSLDouble 0.0
+    { _cellVariableName = getDerivativeName name n
+    , _cellVariableExpr = if n == 0 then buildDSLExpr rhs else getPreviousDerivative name n
     }
 
 buildDSLExpr :: Expression DiscreteTerminal -> DSLExpr
