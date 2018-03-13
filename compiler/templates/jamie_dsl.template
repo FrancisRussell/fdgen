@@ -1,4 +1,4 @@
-module Background(model, velidation) where
+module Background(model, validation) where
 import Prelude
 
 import DSL
