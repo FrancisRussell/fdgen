@@ -7,7 +7,7 @@ import FDGEN.Discrete ( Discretised(..), Mesh(..), Field(..), Solve(..)
                       , numPreviousTimestepsNeeded, DiscreteTerminal(..)
                       , Update(..), constantFoldDiscretised, maxTimestepOrder
                       , getTimestepping, TemporalTerminal(..))
-import FDGEN.Algebra (Expression(..), PairSeq(..))
+import FDGEN.Algebra (Expression(..), PairSeq(..), expandSymbols)
 import Control.Applicative ((<$>))
 import Data.Ratio (numerator, denominator)
 import FDGEN.Precedence (PDoc, pDoc, renderInfix, renderTerminal, Precedence(..), Assoc(..), renderPrefix, renderPrefixMultiParam)
@@ -66,7 +66,7 @@ data DSLExpr
   | DSLCurrent DSLExpr
   | DSLCos DSLExpr
   | DSLSin DSLExpr
-  deriving (Eq, Show)
+  deriving (Eq, Ord, Show)
 
 instance Num DSLExpr where
   (+) = DSLAdd
@@ -103,7 +103,7 @@ getDerivativeName name d = name ++ "_dt" ++ show d
 getPreviousDerivative :: String -> Integer -> DSLExpr
 getPreviousDerivative name offset = case offset of
   0 -> DSLCurrent . DSLCellVariable $ getDerivativeName name 0
-  _ -> DSLCellVariable$ getDerivativeName name (offset - 1)
+  _ -> DSLCellVariable $ getDerivativeName name (offset - 1)
 
 generateTimestepping :: Solve -> Update -> String -> Integer -> DSLExpr
 generateTimestepping solve update name order = buildDSLExpr translateTerminal expr
@@ -112,9 +112,9 @@ generateTimestepping solve update name order = buildDSLExpr translateTerminal ex
     Just e -> e
     Nothing -> error $ "generateTimestepping: missing expression for order " ++ show order
   translateTerminal t = case t of
-    PreviousValue -> DSLCellVariable name
-    DeltaT -> buildDSLExprDiscreteTerminal $ _solveDeltaT solve
-    PreviousDerivative i -> getPreviousDerivative name i
+    PreviousValue -> Symbol $ DSLCellVariable name
+    DeltaT -> expandSymbols expandDiscreteTerminal $ _solveDeltaT solve
+    PreviousDerivative i -> Symbol $ getPreviousDerivative name i
 
 fieldToCellVariables :: Discretised -> Mesh -> Solve -> Field -> [CellVariable]
 fieldToCellVariables _discretised _mesh solve field = (cellVariable:cellVariableDerivatives)
@@ -134,13 +134,13 @@ fieldToCellVariables _discretised _mesh solve field = (cellVariable:cellVariable
     }
   cellVariableDerivative n = CellVariable
     { _cellVariableName = getDerivativeName name n
-    , _cellVariableExpr = if n == 0 then buildDSLExprDiscreteTerminal rhs else getPreviousDerivative name n
+    , _cellVariableExpr = if n == 0
+      then buildDSLExpr expandDiscreteTerminal rhs
+      else getPreviousDerivative name n
     }
 
-buildDSLExprDiscreteTerminal :: Expression DiscreteTerminal -> DSLExpr
-buildDSLExprDiscreteTerminal = buildDSLExpr expandTerminal
-  where
-  expandTerminal s = case s of
+expandDiscreteTerminal :: DiscreteTerminal -> Expression DSLExpr
+expandDiscreteTerminal s = Symbol $ case s of
     FieldDataRef name [] offsets  -> case offsets of
       [0, 0] -> DSLCellVariable name
       [x, y] -> DSLOffset (DSLCellVariable name) (fromIntegral x) (fromIntegral y)
@@ -148,34 +148,35 @@ buildDSLExprDiscreteTerminal = buildDSLExpr expandTerminal
     ConstantDataRef _ _ -> error $ "No non-literal constants expected in FPGA backend (was constant folding applied?): " ++ show s
     FieldDataRef _ _ _  -> error $ "Expected no indices for field index expression (were tensor fields scalarized?): " ++ show s
 
-buildDSLExpr :: Show e => (e -> DSLExpr) -> Expression e -> DSLExpr
-buildDSLExpr translateSymbol expr = case expr of
-  Symbol s -> translateSymbol s
-  Sum seq' -> buildPairSeq (0, (+)) (1, \a b -> a * (buildDSLExpr' $ ConstantRational b)) seq'
-  Product seq' -> buildPairSeq (1, (*)) (1, raiseInt) seq'
-  ConstantFloat f -> DSLDouble f
-  ConstantRational r -> DSLDouble $ fromRational r
-  Abs _ -> error $ "unhandled expression: " ++ show expr
-  Signum _ -> error $ "unhandled expression: " ++ show expr
-  Ln _ -> error $ "unhandled expression: " ++ show expr
-  Diff _ _ _ -> error $ "unhandled expression: " ++ show expr
-  Int _ _ -> error $ "unhandled expression: " ++ show expr
-  Function _ _ -> error $ "unhandled expression: " ++ show expr
+buildDSLExpr :: (Ord e, Show e) => (e -> Expression DSLExpr) -> Expression e -> DSLExpr
+buildDSLExpr translateSymbol = buildDSLExpr' . expandSymbols translateSymbol
   where
-  buildDSLExpr' = buildDSLExpr translateSymbol
-  raiseInt e p = if denominator p == 1
-    then DSLIntPower e (fromIntegral $ numerator p)
-    else error "Cannot translate non-integral power expression"
-  buildPairSeq (null1, op1) (null2, op2) seq' = foldl1 op1 pairExprs'
+  buildDSLExpr' e = case e of
+    Symbol s -> s
+    Sum seq' -> buildPairSeq (0, (+)) (1, \a b -> a * (buildDSLExpr' $ ConstantRational b)) seq'
+    Product seq' -> buildPairSeq (1, (*)) (1, raiseInt) seq'
+    ConstantFloat f -> DSLDouble f
+    ConstantRational r -> DSLDouble $ fromRational r
+    Abs _ -> error $ "unhandled expression: " ++ show e
+    Signum _ -> error $ "unhandled expression: " ++ show e
+    Ln _ -> error $ "unhandled expression: " ++ show e
+    Diff _ _ _ -> error $ "unhandled expression: " ++ show e
+    Int _ _ -> error $ "unhandled expression: " ++ show e
+    Function _ _ -> error $ "unhandled expression: " ++ show e
     where
-    overall = buildDSLExpr' . ConstantRational $ _psOverall seq'
-    pairExprs = transformPair <$> (Map.toList $ _psTerms seq')
-    pairExprs' = if _psOverall seq' == null1 && (not $ Map.null (_psTerms seq'))
-      then pairExprs
-      else (overall:pairExprs)
-    transformPair (a, b) = if b /= null2
-      then (buildDSLExpr' a) `op2` b
-      else (buildDSLExpr' a)
+    raiseInt expr p = if denominator p == 1
+      then DSLIntPower expr (fromIntegral $ numerator p)
+      else error "Cannot translate non-integral power expression"
+    buildPairSeq (null1, op1) (null2, op2) seq' = foldl1 op1 pairExprs'
+      where
+      overall = buildDSLExpr' . ConstantRational $ _psOverall seq'
+      pairExprs = transformPair <$> (Map.toList $ _psTerms seq')
+      pairExprs' = if _psOverall seq' == null1 && (not $ Map.null (_psTerms seq'))
+        then pairExprs
+        else (overall:pairExprs)
+      transformPair (a, b) = if b /= null2
+        then (buildDSLExpr' a) `op2` b
+        else (buildDSLExpr' a)
 
 buildDictionary :: Context -> Template.Dict
 buildDictionary context =
