@@ -240,6 +240,10 @@ instance ContainsLValue FieldTemporalDerivative
   where
   getLValue (FieldTemporalDerivative lvalue _) = lvalue
 
+instance ContainsLValue Update
+  where
+  getLValue = getLValue . _updateLHS
+
 data Update = Update
   { _updateLHS :: FieldTemporalDerivative
   , _updateRHS :: Tensor (Expression Terminal)
@@ -689,7 +693,7 @@ findFieldUpdate lhs solve = case matchingUpdates of
   _ -> error $ "findFieldUpdateRHS: Unable to find update for " ++ show lhs
   where
   updates = _solveUpdates solve
-  matchingUpdates = filter (\u -> getLValue (_updateLHS u) == lhs) updates
+  matchingUpdates = filter (\u -> getLValue u == lhs) updates
 
 buildUpdate :: Mesh -> Parser.FDFL -> Parser.Solve -> Parser.Equation -> Update
 buildUpdate mesh fdfl solve equ = Update
