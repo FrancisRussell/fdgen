@@ -1,5 +1,6 @@
 u = Field(name="velocity", rank=1, spatial_stagger_strategy="dimension")
 h = Field(name="height", rank=0, spatial_stagger_strategy="none")
+dt = NamedLiteral(name="dt", value=10.0)
 nu = NamedLiteral(name="nu", value=0.0)
 g = NamedLiteral(name="g", value=9.81)
 H = NamedLiteral(name="h0", value=5000.0)
@@ -13,6 +14,6 @@ VelocityBC_V = BoundaryCondition(u[1], 0, subdomains=["left_edge", "right_edge"]
 HeightBC = BoundaryCondition(Dn(h), 0)
 
 TimeStep = Solve(name="step", spatial_order=1, temporal_order=3, equations=[VelocityEq, HeightEq], 
-  boundary_conditions=[VelocityBC_H, VelocityBC_V, HeightBC])
+  boundary_conditions=[VelocityBC_H, VelocityBC_V, HeightBC], delta_t=dt)
 
 m = Mesh(name="shallow_water", dimension=2, fields=[u, h], solves=[TimeStep], grid_spacing=[hx, hy])

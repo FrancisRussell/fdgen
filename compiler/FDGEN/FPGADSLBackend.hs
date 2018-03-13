@@ -105,15 +105,15 @@ getPreviousDerivative name offset = case offset of
   0 -> DSLCurrent . DSLCellVariable $ getDerivativeName name 0
   _ -> DSLCellVariable$ getDerivativeName name (offset - 1)
 
-generateTimestepping :: Update -> String -> Integer -> DSLExpr
-generateTimestepping update name order = buildDSLExpr translateTerminal expr
+generateTimestepping :: Solve -> Update -> String -> Integer -> DSLExpr
+generateTimestepping solve update name order = buildDSLExpr translateTerminal expr
   where
   expr = case getTimestepping update order of
     Just e -> e
     Nothing -> error $ "generateTimestepping: missing expression for order " ++ show order
   translateTerminal t = case t of
     PreviousValue -> DSLCellVariable name
-    DeltaT -> fromInteger 42
+    DeltaT -> buildDSLExprDiscreteTerminal $ _solveDeltaT solve
     PreviousDerivative i -> getPreviousDerivative name i
 
 fieldToCellVariables :: Discretised -> Mesh -> Solve -> Field -> [CellVariable]
@@ -130,7 +130,7 @@ fieldToCellVariables _discretised _mesh solve field = (cellVariable:cellVariable
   cellVariableDerivatives = [cellVariableDerivative n | n <- [0..numDerivatives-1]]
   cellVariable = CellVariable
     { _cellVariableName = name
-    , _cellVariableExpr = generateTimestepping update name maxTemporalOrder
+    , _cellVariableExpr = generateTimestepping solve update name maxTemporalOrder
     }
   cellVariableDerivative n = CellVariable
     { _cellVariableName = getDerivativeName name n

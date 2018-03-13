@@ -178,12 +178,13 @@ instance PrettyPrintable BoundaryCondition
    , ("rhs", toDoc $ _bcRHS bc)
    ]
 
-data Solve = Solve {
-  _solveName :: StringLiteral,
-  _solveSpatialOrder :: Integer,
-  _solveTemporalOrder :: Integer,
-  _solveEquations :: [Identifier],
-  _solveBoundaryConditions :: [Identifier]
+data Solve = Solve
+  { _solveName :: StringLiteral
+  , _solveSpatialOrder :: Integer
+  , _solveTemporalOrder :: Integer
+  , _solveEquations :: [Identifier]
+  , _solveBoundaryConditions :: [Identifier]
+  , _solveDeltaT :: FieldExpr Identifier
 } deriving Show
 
 instance PrettyPrintable Solve
@@ -194,6 +195,7 @@ instance PrettyPrintable Solve
    , ("temporal_order", toDoc $ _solveTemporalOrder solve)
    , ("equations", hListDoc $ _solveEquations solve)
    , ("boundary_conditions", hListDoc $ _solveBoundaryConditions solve)
+   , ("delta_t", toDoc $ _solveDeltaT solve)
    ]
 
 data Definition
@@ -408,6 +410,7 @@ parseSolve = ObjectParseSpec "Solve"
   , buildAttributeSpec "temporal_order" False alwaysValid solveTemporalOrder
   , buildAttributeSpec "equations" False (validateList isEquation >=> noDuplicates) solveEquations
   , buildAttributeSpec "boundary_conditions" False (validateList isBoundaryCondition >=> noDuplicates) solveBoundaryConditions
+  , buildAttributeSpec "delta_t" True alwaysValid solveDeltaT
   ]
 
 validateAttributes :: [AttributeSpec s] -> [AttributeUpdate s]
@@ -513,6 +516,7 @@ instance FDFLObject Solve where
     , _solveTemporalOrder = 1
     , _solveEquations = []
     , _solveBoundaryConditions = []
+    , _solveDeltaT = error "undefined solveDeltaT"
     }
 
 class FDFLParsable a where

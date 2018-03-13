@@ -165,6 +165,7 @@ data Solve = Solve
   , _solveTemporalOrder :: Integer
   , _solveUpdates :: [Update]
   , _solveBoundaryConditions :: [BoundaryCondition]
+  , _solveDeltaT :: Expression DiscreteTerminal
 } deriving Show
 
 instance PrettyPrintable Solve
@@ -175,6 +176,7 @@ instance PrettyPrintable Solve
     , ("temporal_order", toDoc $ _solveTemporalOrder solve)
     , ("updates", vListDoc $ _solveUpdates solve)
     , ("boundary_conditions", vListDoc $ _solveBoundaryConditions solve)
+    , ("delta_t", toDoc $ _solveDeltaT solve)
     ]
 
 data Interpolation = Interpolation
@@ -317,6 +319,7 @@ constantFoldDiscretised d = d
   updateSolve mesh solve = solve
     { _solveUpdates = updateUpdate mesh solve <$> _solveUpdates solve
     , _solveBoundaryConditions = updateBC mesh solve <$> _solveBoundaryConditions solve
+    , _solveDeltaT = substDiscreteTerminals $ _solveDeltaT solve
     }
   updateUpdate _mesh _solve update = update
     { _updateRHS = substTerminals <$> _updateRHS update
@@ -440,17 +443,13 @@ buildMesh _ fdfl parserMesh = mesh
     _ -> error $ "buildMesh: unknown solve " ++ Parser.identifierValue ident
   buildGridSpacing = spaceExpressions'
     where
-    spaceExpressions = makeDiscrete <$> Tensor.asScalar . buildTensorRValue meshNoFields fdfl <$> Parser._meshGridSpacing parserMesh
+    spaceExpressions = discretiseMeshConstantExpr <$> Tensor.asScalar . buildTensorRValue meshNoFields fdfl <$> Parser._meshGridSpacing parserMesh
     spaceExpressions' = if genericLength spaceExpressions == dimension
       then validateSpacing <$> spaceExpressions
       else error $ "Incorrect number of grid spacings given for " ++ show dimension ++ " dimensional mesh"
     validateSpacing spacing = case isMeshConstant spacing of
       True -> spacing
       False -> error $ "Grid spacing expression is not constant across grid: " ++ show spacing
-    makeDiscrete = substSymbols makeDiscreteConstant
-      where
-      makeDiscreteConstant (ConstantRef name idx) = ConstantDataRef name idx
-      makeDiscreteConstant sym = error $ "Unable to convert symbol " ++ show sym ++ " to mesh cell-independent value"
 
 buildLiteral :: Parser.FDFL -> Parser.NamedLiteral -> (String, Rational)
 buildLiteral _fdfl namedLiteral = (name, value)
@@ -484,6 +483,12 @@ meshGetField mesh name = case filter (\f -> _fieldName f == name) (_meshFields m
   [f] -> f
   _ -> error $ "Multiple definitions of " ++ name
 
+discretiseMeshConstantExpr :: Expression Terminal -> Expression DiscreteTerminal
+discretiseMeshConstantExpr = substSymbols makeDiscreteConstant
+  where
+  makeDiscreteConstant (ConstantRef name idx) = ConstantDataRef name idx
+  makeDiscreteConstant sym = error $ "Unable to convert symbol " ++ show sym ++ " to mesh cell-independent value"
+
 buildBoundaryCondition :: Mesh -> Parser.FDFL -> Parser.Solve -> Parser.BoundaryCondition -> BoundaryCondition
 buildBoundaryCondition mesh fdfl _solve bc = BoundaryCondition
   { _bcType = bcType
@@ -506,6 +511,7 @@ buildSolve mesh fdfl solve = Solve
   , _solveTemporalOrder = temporalOrder
   , _solveUpdates = (buildUpdate mesh fdfl solve . getExpressionDef) <$> (Parser._solveEquations solve)
   , _solveBoundaryConditions = (buildBoundaryCondition mesh fdfl solve . getBCDef) <$> (Parser._solveBoundaryConditions solve)
+  , _solveDeltaT = buildDeltaT
   }
   where
   temporalOrder = Parser._solveTemporalOrder solve
@@ -515,6 +521,7 @@ buildSolve mesh fdfl solve = Solve
   getBCDef ident = case Parser.getSymbol fdfl ident of
     Just (Parser.BoundaryConditionDef bc) -> bc
     _ -> error $ "buildSolve: unknown boundary condition " ++ Parser.identifierValue ident
+  buildDeltaT = discretiseMeshConstantExpr <$> Tensor.asScalar . buildTensorRValue mesh fdfl $ Parser._solveDeltaT solve
 
 buildAdamsBashForth :: Integer -> Integer -> Expression TemporalTerminal
 buildAdamsBashForth numDerivatives order =
