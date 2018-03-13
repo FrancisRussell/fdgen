@@ -118,6 +118,7 @@ parseBlock :: TemplateParser
 parseBlock = many $ choice parsers
   where
   parsers = [ parseDirective
+            , parseDollar
             , parseNonSpecial
             ]
 
@@ -171,6 +172,12 @@ parseIfPresent = do
     parseReserved "is"
     path <- parsePath
     return (ident, path)
+
+
+parseDollar :: TemplateElementParser
+parseDollar = do
+  _ <- try (string "$$")
+  return $ Text "$"
 
 parseNonSpecial :: TemplateElementParser
 parseNonSpecial = Text <$> (many1 $ noneOf ['$'])
