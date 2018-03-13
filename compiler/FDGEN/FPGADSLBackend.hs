@@ -153,7 +153,7 @@ buildDSLExpr translateSymbol = buildDSLExpr' . expandSymbols translateSymbol
   where
   buildDSLExpr' e = case e of
     Symbol s -> s
-    Sum seq' -> buildPairSeq (0, (+)) (1, \a b -> a * (buildDSLExpr' $ ConstantRational b)) seq'
+    Sum seq' -> buildPairSeq (0, (+)) (1, multRational) seq'
     Product seq' -> buildPairSeq (1, (*)) (1, raiseInt) seq'
     ConstantFloat f -> DSLDouble f
     ConstantRational r -> DSLDouble $ fromRational r
@@ -164,6 +164,9 @@ buildDSLExpr translateSymbol = buildDSLExpr' . expandSymbols translateSymbol
     Int _ _ -> error $ "unhandled expression: " ++ show e
     Function _ _ -> error $ "unhandled expression: " ++ show e
     where
+    multRational a b = if b /= (-1)
+      then a * (buildDSLExpr' $ ConstantRational b)
+      else DSLNegate a
     raiseInt expr p = if denominator p == 1
       then DSLIntPower expr (fromIntegral $ numerator p)
       else error "Cannot translate non-integral power expression"
