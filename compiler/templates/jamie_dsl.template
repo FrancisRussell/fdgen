@@ -17,3 +17,6 @@ ${ifpresent initial is field.initial}
 
 ${end}
 ${end}
+${for bc in boundary_conditions}
+  setBoundryCondition "${bc.variable_name}"
+${end}

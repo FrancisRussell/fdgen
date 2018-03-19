@@ -2,7 +2,8 @@ module FDGEN.Discrete (buildDiscreteForm, buildTemplateDictionary
                       , Discretised(..), Mesh(..), Field(..), Solve(..), findFieldUpdate, FieldLValue(..)
                       , numPreviousTimestepsNeeded, DiscreteTerminal(..), Update(..)
                       , scalarizeTensorFields, constantFoldDiscretised
-                      , maxTimestepOrder, getTimestepping, TemporalTerminal(..)) where
+                      , maxTimestepOrder, getTimestepping, TemporalTerminal(..)
+                      , BoundaryCondition(..), EdgeDomain(..)) where
 import FDGEN.Algebra (Expression(..), diff, adamsBashforthGeneral, expandSymbols, substSymbols, rewriteFixedPoint, vars)
 import FDGEN.Tensor (Tensor, TensorIndex)
 import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, vListDoc)

@@ -3,7 +3,7 @@ import FDGEN.Backend(Backend(..))
 import System.IO (hPutStrLn, stderr)
 import System.Exit (exitFailure)
 import FDGEN.Discrete ( Discretised(..), Mesh(..), Field(..), Solve(..)
-                      , FieldLValue(..), findFieldUpdate
+                      , FieldLValue(..), BoundaryCondition(..), findFieldUpdate
                       , numPreviousTimestepsNeeded, DiscreteTerminal(..)
                       , Update(..), constantFoldDiscretised, maxTimestepOrder
                       , getTimestepping, TemporalTerminal(..))
@@ -14,12 +14,15 @@ import FDGEN.Precedence (PDoc, pDoc, renderInfix, renderTerminal, Precedence(..)
 import FDGEN.Pretty (PrettyPrintable(..))
 import qualified FDGEN.Template as Template
 import qualified FDGEN.Tensor as Tensor
+import qualified FDGEN.Discrete as Discrete
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 
 data FPGADSLBackend = FPGADSLBackend
 
 data Context = Context
   { _contextCellVariables :: [CellVariable]
+  , _contextBCDirectives :: [BCDirective]
   } deriving Show
 
 data CellVariable = CellVariable
@@ -27,6 +30,36 @@ data CellVariable = CellVariable
   , _cellVariableExpr :: DSLExpr
   , _cellVariableInitialExpr :: Maybe (Integer, DSLExpr)
   } deriving Show
+
+data BCDirective = BCDirective
+  { _bcDirectiveVariable :: String
+  } deriving Show
+
+data EdgeDomain
+  = LeftEdge
+  | RightEdge
+  | TopEdge
+  | BottomEdge
+  deriving (Eq, Ord, Show)
+
+allExteriorEdgeDomains :: [EdgeDomain]
+allExteriorEdgeDomains = [LeftEdge, RightEdge, TopEdge, BottomEdge]
+
+tagToEdgeDomains :: String -> [EdgeDomain]
+tagToEdgeDomains tag = case tag of
+  "left_edge" -> [LeftEdge]
+  "right_edge" -> [RightEdge]
+  "top_edge" -> [TopEdge]
+  "bottom_edge" -> [BottomEdge]
+  _ -> error $ "Unrecognised tag for edge domain " ++ show tag
+
+translateEdgeDomain :: Discrete.EdgeDomain -> [EdgeDomain]
+translateEdgeDomain d = case d of
+  Discrete.AllExteriorEdges -> allExteriorEdgeDomains
+  Discrete.TaggedEdgeString s -> tagToEdgeDomains s
+
+concatMapUniq :: (Foldable t, Ord b) => (a -> [b]) -> t a -> [b]
+concatMapUniq f = Set.toList . Set.fromList . concatMap f
 
 renderDSLExpr :: DSLExpr -> String
 renderDSLExpr = prettyPrint . pDoc . renderDSLExpr'
@@ -89,6 +122,7 @@ getSingleton name lst = error $ "Expected single " ++ name ++ ", but there were 
 generateContext :: Discretised -> Context
 generateContext discretised = Context
   { _contextCellVariables = buildCellVariables discretised mesh solve
+  , _contextBCDirectives = buildBCDirectives discretised mesh solve
   }
   where
   mesh = getSingleton "mesh" (_discretisedMeshes discretised)
@@ -97,6 +131,25 @@ generateContext discretised = Context
 buildCellVariables :: Discretised -> Mesh -> Solve -> [CellVariable]
 buildCellVariables discretised mesh solve =
   concatMap (fieldToCellVariables discretised mesh solve) (_meshFields mesh)
+
+buildBCDirectives :: Discretised -> Mesh -> Solve -> [BCDirective]
+buildBCDirectives discretised mesh solve =
+  concatMap (bcToDirectives discretised mesh solve) (_solveBoundaryConditions solve)
+
+bcToDirectives :: Discretised -> Mesh -> Solve -> BoundaryCondition -> [BCDirective]
+bcToDirectives _discretised _mesh _solve bc = buildDirective <$> edge_domains
+  where
+  buildDirective = const BCDirective
+    { _bcDirectiveVariable = fieldName
+    }
+  edge_domains = concatMapUniq translateEdgeDomain (_bcSubdomains bc)
+  fieldLValue = _bcField bc
+  fieldName = getScalarFieldName fieldLValue
+
+getScalarFieldName :: FieldLValue -> String
+getScalarFieldName lvalue = case lvalue of
+  FieldLValue name [] -> name
+  FieldLValue name _ -> error $ "Boundary condition for field " ++ name ++ " is not scalarized"
 
 getDerivativeName :: String -> Integer -> String
 getDerivativeName name d = name ++ "_dt" ++ show d
@@ -188,10 +241,12 @@ buildDSLExpr translateSymbol = buildDSLExpr' . expandSymbols translateSymbol
         else (buildDSLExpr' a)
 
 buildDictionary :: Context -> Template.Dict
-buildDictionary context =
-  Template.insert "fields" (Template.ListVal $ Template.DictVal <$> fieldDictionaries) Template.emptyDict
+buildDictionary context = template'
   where
+  template = Template.insert "fields" (Template.ListVal $ Template.DictVal <$> fieldDictionaries) Template.emptyDict
+  template' = Template.insert "boundary_conditions" (Template.ListVal $ Template.DictVal <$> bcDictionaries) template
   fieldDictionaries = buildCellVariableDictionary <$> _contextCellVariables context
+  bcDictionaries = buildBCDirectiveDictionary <$> _contextBCDirectives context
 
 buildCellVariableDictionary :: CellVariable -> Template.Dict
 buildCellVariableDictionary cellVariable = Map.fromList $
@@ -208,6 +263,13 @@ buildCellVariableDictionary cellVariable = Map.fromList $
         [ ("count", Template.StringVal $ show count)
         , ("expression", Template.StringVal $ renderDSLExpr expr)
         ]
+
+buildBCDirectiveDictionary :: BCDirective -> Template.Dict
+buildBCDirectiveDictionary bcDirective = Map.fromList $
+  [ ("variable_name", Template.StringVal name)
+  ]
+  where
+  name = _bcDirectiveVariable bcDirective
 
 instance Backend FPGADSLBackend
   where
