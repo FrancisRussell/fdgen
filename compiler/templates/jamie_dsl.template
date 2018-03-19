@@ -9,6 +9,10 @@ ${field.name} = CellVariable "${field.name}"
 ${end}
 
 model = do
+  setWidth $$ ${width}
+
+  setHeight $$ ${height}
+
 ${for field in fields}
   addUpdate "${field.name}" $$ ${field.update}
 

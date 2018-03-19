@@ -48,6 +48,7 @@ data Mesh = Mesh
   , _meshFields :: [Identifier]
   , _meshSolves :: [Identifier]
   , _meshGridSpacing :: [FieldExpr Identifier]
+  , _meshGridDimensions :: [FieldExpr Identifier]
 } deriving Show
 
 instance PrettyPrintable Mesh
@@ -57,7 +58,8 @@ instance PrettyPrintable Mesh
     , ("dim", toDoc $ _meshDimension mesh)
     , ("fields", hListDoc $ _meshFields mesh)
     , ("solves", hListDoc $ _meshSolves mesh)
-    , ("grid_spacing", hListDoc $ _meshGridSpacing mesh)
+    , ("spacing", hListDoc $ _meshGridSpacing mesh)
+    , ("dimensions", hListDoc $ _meshGridDimensions mesh)
     ]
 
 data Field = Field {
@@ -370,7 +372,8 @@ parseMesh = ObjectParseSpec "Mesh" []
   , buildAttributeSpec "dimension" True alwaysValid meshDimension
   , buildAttributeSpec "fields" True (validateList isFieldLike >=> noDuplicates) meshFields
   , buildAttributeSpec "solves" True (validateList isSolve >=> noDuplicates) meshSolves
-  , buildAttributeSpec "grid_spacing" True alwaysValid meshGridSpacing
+  , buildAttributeSpec "spacing" True alwaysValid meshGridSpacing
+  , buildAttributeSpec "dimensions" True alwaysValid meshGridDimensions
   ]
 
 parseEquation :: ObjectParseSpec Equation
@@ -476,7 +479,8 @@ instance FDFLObject Mesh where
     , _meshDimension = error "undefined meshDimension"
     , _meshFields = []
     , _meshSolves = []
-    , _meshGridSpacing = []
+    , _meshGridSpacing = error "undefined meshGridSpacing"
+    , _meshGridDimensions = error "undefined mesgGridDimensions"
     }
 
 instance FDFLObject Equation where

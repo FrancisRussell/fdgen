@@ -22,6 +22,7 @@ data FPGADSLBackend = FPGADSLBackend
 
 data Context = Context
   { _contextCellVariables :: [CellVariable]
+  , _contextMeshDimensions :: [DSLExpr]
   , _contextBCDirectives :: [BCDirective]
   } deriving Show
 
@@ -136,10 +137,12 @@ generateContext :: Discretised -> Context
 generateContext discretised = Context
   { _contextCellVariables = buildCellVariables discretised mesh solve
   , _contextBCDirectives = buildBCDirectives discretised mesh solve
+  , _contextMeshDimensions = buildDSLExpr expandDiscreteTerminal <$> mesh_dimensions
   }
   where
   mesh = getSingleton "mesh" (_discretisedMeshes discretised)
   solve = getSingleton "solve" (_meshSolves mesh)
+  mesh_dimensions = _meshDimensions mesh
 
 buildCellVariables :: Discretised -> Mesh -> Solve -> [CellVariable]
 buildCellVariables discretised mesh solve =
@@ -255,12 +258,19 @@ buildDSLExpr translateSymbol = buildDSLExpr' . expandSymbols translateSymbol
         else (buildDSLExpr' a)
 
 buildDictionary :: Context -> Template.Dict
-buildDictionary context = template'
+buildDictionary context = template'''
   where
   template = Template.insert "fields" (Template.ListVal $ Template.DictVal <$> fieldDictionaries) Template.emptyDict
   template' = Template.insert "boundary_conditions" (Template.ListVal $ Template.DictVal <$> bcDictionaries) template
+  template'' = Template.insert "width" (Template.StringVal $ renderDSLExpr $ (_contextMeshDimensions context !! 0)) template'
+  template''' = Template.insert "height" (Template.StringVal $ renderDSLExpr $ (_contextMeshDimensions context !! 1)) template''
   fieldDictionaries = buildCellVariableDictionary <$> _contextCellVariables context
   bcDictionaries = buildBCDirectiveDictionary <$> _contextBCDirectives context
+
+rationalToInteger :: Rational -> Integer
+rationalToInteger r = case denominator r of
+  1 -> numerator r
+  _ -> error $ "Expected value " ++ show r ++ "to be an integer"
 
 buildCellVariableDictionary :: CellVariable -> Template.Dict
 buildCellVariableDictionary cellVariable = Map.fromList $

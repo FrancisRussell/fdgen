@@ -130,6 +130,7 @@ data Mesh = Mesh
   , _meshFields :: [Field]
   , _meshSolves :: [Solve]
   , _meshGridSpacing :: [Expression DiscreteTerminal]
+  , _meshDimensions :: [Expression DiscreteTerminal]
   } deriving Show
 
 instance PrettyPrintable Mesh
@@ -140,6 +141,7 @@ instance PrettyPrintable Mesh
     , ("fields", vListDoc $ _meshFields mesh)
     , ("solves", vListDoc $ _meshSolves mesh)
     , ("grid_spacing", hListDoc $ _meshGridSpacing mesh)
+    , ("dimensions", hListDoc $ _meshDimensions mesh)
     ]
 
 data Field = Field
@@ -320,6 +322,7 @@ constantFoldDiscretised d = d
   where
   updateMesh mesh = mesh
     { _meshSolves = updateSolve mesh <$> _meshSolves mesh
+    , _meshDimensions = substDiscreteTerminals <$> _meshDimensions mesh
     }
   updateSolve mesh solve = solve
     { _solveUpdates = updateUpdate mesh solve <$> _solveUpdates solve
@@ -432,7 +435,8 @@ buildMesh _ fdfl parserMesh = mesh
     , _meshDimension = dimension
     , _meshFields = error "buildMesh: fields not yet populated"
     , _meshSolves = error "buildMesh: solves not yet populated"
-    , _meshGridSpacing = buildGridSpacing
+    , _meshGridSpacing = buildPerMeshDimensionScalar $ Parser._meshGridSpacing parserMesh
+    , _meshDimensions = buildPerMeshDimensionScalar $ Parser._meshGridDimensions parserMesh
     }
   meshFields = (buildField meshNoFields fdfl . Parser.getFieldDef fdfl) <$> (Parser._meshFields parserMesh)
   meshNoSolves = meshNoFields
@@ -446,15 +450,15 @@ buildMesh _ fdfl parserMesh = mesh
   getSolveDef ident = case Parser.getSymbol fdfl ident of
     Just (Parser.SolveDef solve) -> solve
     _ -> error $ "buildMesh: unknown solve " ++ Parser.identifierValue ident
-  buildGridSpacing = spaceExpressions'
+  buildPerMeshDimensionScalar parsedExpressions = expressions'
     where
-    spaceExpressions = discretiseMeshConstantExpr <$> Tensor.asScalar . buildTensorRValue meshNoFields fdfl <$> Parser._meshGridSpacing parserMesh
-    spaceExpressions' = if genericLength spaceExpressions == dimension
-      then validateSpacing <$> spaceExpressions
-      else error $ "Incorrect number of grid spacings given for " ++ show dimension ++ " dimensional mesh"
-    validateSpacing spacing = case isMeshConstant spacing of
-      True -> spacing
-      False -> error $ "Grid spacing expression is not constant across grid: " ++ show spacing
+    expressions = discretiseMeshConstantExpr <$> Tensor.asScalar . buildTensorRValue meshNoFields fdfl <$> parsedExpressions
+    expressions' = if genericLength expressions == dimension
+      then validateExpression <$> expressions
+      else error $ "Incorrect number of expressions given for " ++ show dimension ++ " dimensional mesh"
+    validateExpression expr = case isMeshConstant expr of
+      True -> expr
+      False -> error $ "Expression is not constant across grid: " ++ show expr
 
 buildLiteral :: Parser.FDFL -> Parser.NamedLiteral -> (String, Rational)
 buildLiteral _fdfl namedLiteral = (name, value)
