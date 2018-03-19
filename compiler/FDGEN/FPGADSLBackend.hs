@@ -33,6 +33,7 @@ data CellVariable = CellVariable
 
 data BCDirective = BCDirective
   { _bcDirectiveVariable :: String
+  , _bcDirectiveAxis :: Axis
   } deriving Show
 
 data EdgeDomain
@@ -41,6 +42,18 @@ data EdgeDomain
   | TopEdge
   | BottomEdge
   deriving (Eq, Ord, Show)
+
+data Axis
+  = Vertical
+  | Horizontal
+  deriving (Eq, Ord, Show)
+
+getEdgeDomainAxis :: EdgeDomain -> Axis
+getEdgeDomainAxis d = case d of
+  LeftEdge -> Vertical
+  RightEdge -> Vertical
+  TopEdge -> Horizontal
+  BottomEdge -> Horizontal
 
 allExteriorEdgeDomains :: [EdgeDomain]
 allExteriorEdgeDomains = [LeftEdge, RightEdge, TopEdge, BottomEdge]
@@ -58,7 +71,7 @@ translateEdgeDomain d = case d of
   Discrete.AllExteriorEdges -> allExteriorEdgeDomains
   Discrete.TaggedEdgeString s -> tagToEdgeDomains s
 
-concatMapUniq :: (Foldable t, Ord b) => (a -> [b]) -> t a -> [b]
+concatMapUniq :: Ord b => (a -> [b]) -> [a] -> [b]
 concatMapUniq f = Set.toList . Set.fromList . concatMap f
 
 renderDSLExpr :: DSLExpr -> String
@@ -139,8 +152,9 @@ buildBCDirectives discretised mesh solve =
 bcToDirectives :: Discretised -> Mesh -> Solve -> BoundaryCondition -> [BCDirective]
 bcToDirectives _discretised _mesh _solve bc = buildDirective <$> edge_domains
   where
-  buildDirective = const BCDirective
+  buildDirective edge_domain = BCDirective
     { _bcDirectiveVariable = fieldName
+    , _bcDirectiveAxis = getEdgeDomainAxis edge_domain
     }
   edge_domains = concatMapUniq translateEdgeDomain (_bcSubdomains bc)
   fieldLValue = _bcField bc
@@ -266,7 +280,8 @@ buildCellVariableDictionary cellVariable = Map.fromList $
 
 buildBCDirectiveDictionary :: BCDirective -> Template.Dict
 buildBCDirectiveDictionary bcDirective = Map.fromList $
-  [ ("variable_name", Template.StringVal name)
+  [ ("variable", Template.StringVal name)
+  , ("axis", Template.StringVal . show $ _bcDirectiveAxis bcDirective)
   ]
   where
   name = _bcDirectiveVariable bcDirective
