@@ -4,7 +4,7 @@ module FDGEN.Tensor ( Tensor, getElement, setElement, add, sub, inner
                     , generateTensor, TensorIndex, divide, mapWithIndex
                     , flattenIndex, getShape, TensorShaped(..)
                     , constructShape, numEntries, unflattenIndex
-                    , fromSubTensors, asScalar) where
+                    , fromSubTensors, asScalar, getEntries) where
 import Control.Applicative ((<$>))
 import Data.Foldable (foldl')
 import Data.List.Split (chunksOf)
@@ -47,6 +47,9 @@ instance TensorShaped TensorShape where
 
 numEntries :: TensorShaped e => e -> Integer
 numEntries t = (tensorDim t) ^ (tensorRank t)
+
+getEntries :: Tensor e -> [e]
+getEntries = _tensorEntries
 
 getShape :: TensorShaped e => e -> TensorShape
 getShape t = TensorShape (tensorDim t) (tensorRank t)

@@ -6,12 +6,15 @@ import FDGEN.Discrete ( Discretised(..), Mesh(..), Field(..), Solve(..)
                       , FieldLValue(..), BoundaryCondition(..), findFieldUpdate
                       , numPreviousTimestepsNeeded, DiscreteTerminal(..)
                       , Update(..), constantFoldDiscretised, maxTimestepOrder
-                      , getTimestepping, TemporalTerminal(..))
+                      , getTimestepping, TemporalTerminal(..), solveGetGhostSizes)
 import FDGEN.Algebra (Expression(..), PairSeq(..), expandSymbols)
 import Control.Applicative ((<$>))
 import Data.Ratio (numerator, denominator)
 import FDGEN.Precedence (PDoc, pDoc, renderInfix, renderTerminal, Precedence(..), Assoc(..), renderPrefix, renderPrefixMultiParam)
 import FDGEN.Pretty (PrettyPrintable(..))
+import FDGEN.Util (mergeBoundingRange)
+import Data.Map (Map)
+import Data.List (genericReplicate)
 import qualified FDGEN.Template as Template
 import qualified FDGEN.Tensor as Tensor
 import qualified FDGEN.Discrete as Discrete
@@ -133,16 +136,25 @@ getSingleton :: String -> [e] -> e
 getSingleton _ [e] = e
 getSingleton name lst = error $ "Expected single " ++ name ++ ", but there were " ++ (show $ length lst)
 
+mergeGhostSizes :: Integer -> Map FieldLValue [(Integer, Integer)] -> [(Integer, Integer)]
+mergeGhostSizes dim m = Map.foldr mergeBoundingRange (genericReplicate dim (0, 0)) m
+
 generateContext :: Discretised -> Context
-generateContext discretised = Context
-  { _contextCellVariables = buildCellVariables discretised mesh solve
-  , _contextBCDirectives = buildBCDirectives discretised mesh solve
-  , _contextMeshDimensions = buildDSLExprInteger expandDiscreteTerminal <$> mesh_dimensions
-  }
+generateContext discretised = context
   where
+  context = Context
+    { _contextCellVariables = buildCellVariables discretised mesh solve
+    , _contextBCDirectives = buildBCDirectives discretised mesh solve
+    , _contextMeshDimensions = oversizedDimensionsDSL
+    }
+  meshDimensionsDSL = buildDSLExprInteger expandDiscreteTerminal <$> meshDimensions
+  ghostSizes = mergeGhostSizes meshDimension $ solveGetGhostSizes solve
+  margins = (\(a,b) -> (abs a, abs b)) <$> ghostSizes
+  oversizedDimensionsDSL = (\(a, (l, u)) -> a + fromInteger (l + u + 1)) <$> zip meshDimensionsDSL margins
   mesh = getSingleton "mesh" (_discretisedMeshes discretised)
   solve = getSingleton "solve" (_meshSolves mesh)
-  mesh_dimensions = _meshDimensions mesh
+  meshDimensions = _meshDimensions mesh
+  meshDimension = _meshDimension mesh
 
 buildCellVariables :: Discretised -> Mesh -> Solve -> [CellVariable]
 buildCellVariables discretised mesh solve =

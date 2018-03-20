@@ -3,11 +3,12 @@ module FDGEN.Discrete (buildDiscreteForm, buildTemplateDictionary
                       , numPreviousTimestepsNeeded, DiscreteTerminal(..), Update(..)
                       , scalarizeTensorFields, constantFoldDiscretised
                       , maxTimestepOrder, getTimestepping, TemporalTerminal(..)
-                      , BoundaryCondition(..), EdgeDomain(..)) where
+                      , BoundaryCondition(..), EdgeDomain(..), solveGetGhostSizes) where
 import FDGEN.Algebra (Expression(..), diff, adamsBashforthGeneral, expandSymbols, substSymbols, rewriteFixedPoint, vars)
 import FDGEN.Tensor (Tensor, TensorIndex)
 import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, vListDoc)
 import FDGEN.Stencil (StencilSpec(..), Stencil(..), buildStencil, Stagger(..))
+import FDGEN.Util (mergeBoundingRange)
 import Control.Applicative ((<$>))
 import Control.Exception (assert)
 import Data.Maybe (catMaybes)
@@ -717,3 +718,27 @@ buildUpdate mesh fdfl solve equ = Update
     where
     buildDerivative n (Parser.FieldTemporalDerivative subExpr) = buildDerivative (n + 1) subExpr
     buildDerivative n lValue = FieldTemporalDerivative (findLValue mesh fdfl lValue) n
+
+
+mergeBoundingMap :: Map FieldLValue [(Integer, Integer)] -> Map FieldLValue [(Integer, Integer)] -> Map FieldLValue [(Integer, Integer)]
+mergeBoundingMap a b = foldr (uncurry $ Map.insertWith mergeBoundingRange) a (Map.toList b)
+
+expressionGetGhostSizes :: Expression DiscreteTerminal -> Map FieldLValue [(Integer, Integer)]
+expressionGetGhostSizes expr = result
+  where
+  result = foldr (uncurry $ Map.insertWith mergeBoundingRange) Map.empty accesses
+  unknowns = vars expr
+  accesses = catMaybes $ getGhost <$> Set.toList unknowns
+  getGhost v = case v of
+    FieldDataRef name tensorIndex stencilIndex -> Just (FieldLValue name tensorIndex, makeRange <$> stencilIndex)
+    ConstantDataRef _ _ -> Nothing
+  makeRange i = (i, i)
+
+updateGetGhostSizes :: Update -> Map FieldLValue [(Integer, Integer)]
+updateGetGhostSizes update = foldr mergeBoundingMap Map.empty (expressionGetGhostSizes <$> tensorEntries)
+  where
+  rhs = _updateRHSDiscrete update
+  tensorEntries = Tensor.getEntries rhs
+
+solveGetGhostSizes :: Solve -> Map FieldLValue [(Integer, Integer)]
+solveGetGhostSizes solve = foldr mergeBoundingMap Map.empty (updateGetGhostSizes <$> _solveUpdates solve)
