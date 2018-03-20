@@ -87,7 +87,7 @@ renderDSLExpr = prettyPrint . pDoc . renderDSLExpr'
     DSLIntPower e i -> renderApplication "IntPower" [renderDSLExpr' e, renderNum i]
     DSLCellVariable name -> renderTerminal name
     DSLConstant name e -> renderApplication "Constant" [renderTerminal name, renderDSLExpr' e]
-    DSLInt i -> renderNum i
+    DSLInt i -> renderApplication "EInt" [renderNum i]
     DSLDouble d -> renderNum d
     DSLOffset e x y -> renderApplication "Offset" [renderDSLExpr' e, renderNum x, renderNum y]
     DSLCurrent e -> renderApplication "Current" [renderDSLExpr' e]
@@ -137,7 +137,7 @@ generateContext :: Discretised -> Context
 generateContext discretised = Context
   { _contextCellVariables = buildCellVariables discretised mesh solve
   , _contextBCDirectives = buildBCDirectives discretised mesh solve
-  , _contextMeshDimensions = buildDSLExpr expandDiscreteTerminal <$> mesh_dimensions
+  , _contextMeshDimensions = buildDSLExprInteger expandDiscreteTerminal <$> mesh_dimensions
   }
   where
   mesh = getSingleton "mesh" (_discretisedMeshes discretised)
@@ -224,6 +224,36 @@ expandDiscreteTerminal s = Symbol $ case s of
     ConstantDataRef _ _ -> error $ "No non-literal constants expected in FPGA backend (was constant folding applied?): " ++ show s
     FieldDataRef _ _ _  -> error $ "Expected no indices for field index expression (were tensor fields scalarized?): " ++ show s
 
+buildDSLExprInteger :: (Ord e, Show e) => (e -> Expression DSLExpr) -> Expression e -> DSLExpr
+buildDSLExprInteger translateSymbol = buildDSLExpr' . expandSymbols translateSymbol
+  where
+  buildDSLExpr' e = case e of
+    Symbol s -> s
+    Sum seq' -> buildPairSeq (0, (+)) (1, multRational) seq'
+    Product seq' -> buildPairSeq (1, (*)) (1, raiseInt) seq'
+    ConstantRational r -> if denominator r == 1
+      then DSLInt . fromInteger $ numerator r
+      else error $ "Expected integer, but found rational: " ++ show r
+    ConstantFloat _ -> error $ "buildDSLExprInteger: Unexpected float in integer expression: " ++ show e
+    _ -> error $ "Unexpected term when trying to contruct integer expression: " ++ show e
+    where
+    multRational a b = if b /= (-1)
+      then a * (buildDSLExpr' $ ConstantRational b)
+      else DSLNegate a
+    raiseInt expr p = if denominator p == 1
+      then DSLIntPower expr (fromIntegral $ numerator p)
+      else error "Cannot translate non-integral power expression"
+    buildPairSeq (null1, op1) (null2, op2) seq' = foldl1 op1 pairExprs'
+      where
+      overall = buildDSLExpr' . ConstantRational $ _psOverall seq'
+      pairExprs = transformPair <$> (Map.toList $ _psTerms seq')
+      pairExprs' = if _psOverall seq' == null1 && (not $ Map.null (_psTerms seq'))
+        then pairExprs
+        else (overall:pairExprs)
+      transformPair (a, b) = if b /= null2
+        then (buildDSLExpr' a) `op2` b
+        else (buildDSLExpr' a)
+
 buildDSLExpr :: (Ord e, Show e) => (e -> Expression DSLExpr) -> Expression e -> DSLExpr
 buildDSLExpr translateSymbol = buildDSLExpr' . expandSymbols translateSymbol
   where
@@ -266,11 +296,6 @@ buildDictionary context = template'''
   template''' = Template.insert "height" (Template.StringVal $ renderDSLExpr $ (_contextMeshDimensions context !! 1)) template''
   fieldDictionaries = buildCellVariableDictionary <$> _contextCellVariables context
   bcDictionaries = buildBCDirectiveDictionary <$> _contextBCDirectives context
-
-rationalToInteger :: Rational -> Integer
-rationalToInteger r = case denominator r of
-  1 -> numerator r
-  _ -> error $ "Expected value " ++ show r ++ "to be an integer"
 
 buildCellVariableDictionary :: CellVariable -> Template.Dict
 buildCellVariableDictionary cellVariable = Map.fromList $
