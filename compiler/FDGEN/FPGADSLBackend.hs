@@ -6,7 +6,8 @@ import FDGEN.Discrete ( Discretised(..), Mesh(..), Field(..), Solve(..)
                       , FieldLValue(..), BoundaryCondition(..), findFieldUpdate
                       , numPreviousTimestepsNeeded, DiscreteTerminal(..)
                       , Update(..), constantFoldDiscretised, maxTimestepOrder
-                      , getTimestepping, TemporalTerminal(..), solveGetGhostSizes)
+                      , getTimestepping, TemporalTerminal(..), solveGetGhostSizes
+                      , meshGetField, BoundaryConditionType(..))
 import FDGEN.Algebra (Expression(..), PairSeq(..), expandSymbols)
 import Control.Applicative ((<$>))
 import Data.Ratio (numerator, denominator)
@@ -14,7 +15,7 @@ import FDGEN.Precedence (PDoc, pDoc, renderInfix, renderTerminal, Precedence(..)
 import FDGEN.Pretty (PrettyPrintable(..))
 import FDGEN.Util (mergeBoundingRange)
 import Data.Map (Map)
-import Data.List (genericReplicate)
+import Data.List (genericReplicate, genericIndex)
 import qualified FDGEN.Template as Template
 import qualified FDGEN.Tensor as Tensor
 import qualified FDGEN.Discrete as Discrete
@@ -38,7 +39,16 @@ data CellVariable = CellVariable
 data BCDirective = BCDirective
   { _bcDirectiveVariable :: String
   , _bcDirectiveAxis :: Axis
+  , _bcDirectiveOffset :: DSLExpr
+  , _bcDirectiveLow :: DSLExpr
+  , _bcDirectiveHigh :: DSLExpr
+  , _bcDirectiveAction :: ValueSource
   } deriving Show
+
+data Sign
+  = Negative
+  | Positive
+  deriving (Eq, Ord, Show)
 
 data EdgeDomain
   = LeftEdge
@@ -52,12 +62,36 @@ data Axis
   | Horizontal
   deriving (Eq, Ord, Show)
 
+data MeshInfo = MeshInfo
+  { _meshInfoMargins :: [(Integer, Integer)]
+  , _meshInfoDimensions :: [DSLExpr]
+  } deriving Show
+
+data ValueSource
+  = CopyValueTowardsZero
+  | CopyValueAwayFromZero
+  | NegateValueTowardsZero
+  | NegateValueAwayFromZero
+  | SetZero
+  deriving Show
+
 getEdgeDomainAxis :: EdgeDomain -> Axis
 getEdgeDomainAxis d = case d of
   LeftEdge -> Vertical
   RightEdge -> Vertical
   TopEdge -> Horizontal
   BottomEdge -> Horizontal
+
+axisDimension :: Axis -> Integer
+axisDimension Horizontal = 0
+axisDimension Vertical = 1
+
+normalSign :: EdgeDomain -> Sign
+normalSign d = case d of
+  LeftEdge -> Negative
+  RightEdge -> Positive
+  TopEdge -> Positive
+  BottomEdge -> Negative
 
 allExteriorEdgeDomains :: [EdgeDomain]
 allExteriorEdgeDomains = [LeftEdge, RightEdge, TopEdge, BottomEdge]
@@ -147,6 +181,10 @@ generateContext discretised = context
     , _contextBCDirectives = buildBCDirectives discretised mesh solve
     , _contextMeshDimensions = oversizedDimensionsDSL
     }
+  meshInfo = MeshInfo
+    { _meshInfoMargins = margins
+    , _meshInfoDimensions = meshDimensionsDSL
+    }
   meshDimensionsDSL = buildDSLExprInteger expandDiscreteTerminal <$> meshDimensions
   ghostSizes = mergeGhostSizes meshDimension $ solveGetGhostSizes solve
   margins = (\(a,b) -> (abs a, abs b)) <$> ghostSizes
@@ -165,15 +203,52 @@ buildBCDirectives discretised mesh solve =
   concatMap (bcToDirectives discretised mesh solve) (_solveBoundaryConditions solve)
 
 bcToDirectives :: Discretised -> Mesh -> Solve -> BoundaryCondition -> [BCDirective]
-bcToDirectives _discretised _mesh _solve bc = buildDirective <$> edge_domains
+bcToDirectives _discretised mesh solve bc = buildDirective <$> edge_domains
   where
+  edge_domains = concatMapUniq translateEdgeDomain (_bcSubdomains bc)
   buildDirective edge_domain = BCDirective
     { _bcDirectiveVariable = fieldName
     , _bcDirectiveAxis = getEdgeDomainAxis edge_domain
+    , _bcDirectiveOffset = edgeOffset
+    , _bcDirectiveLow = fst planeLimits
+    , _bcDirectiveHigh = snd planeLimits
+    , _bcDirectiveAction = action
     }
-  edge_domains = concatMapUniq translateEdgeDomain (_bcSubdomains bc)
-  fieldLValue = _bcField bc
-  fieldName = getScalarFieldName fieldLValue
+    where
+      bcAxis = getEdgeDomainAxis edge_domain
+      bcDimension = axisDimension bcAxis
+      fieldLValue = _bcField bc
+      fieldName = getScalarFieldName fieldLValue
+      bcType = _bcType bc
+      meshDimension = _meshDimension mesh
+      meshDimensions = _meshDimensions mesh
+      makeIntegerExpr = buildDSLExprInteger expandDiscreteTerminal
+      ghostSizes = mergeGhostSizes meshDimension $ solveGetGhostSizes solve
+      margins = (\(a,b) -> (abs a, abs b)) <$> ghostSizes
+      field = meshGetField mesh fieldName
+      fieldStaggered = genericIndex (getSingleton "stagger" $ _fieldStaggerSpatial field) bcDimension
+      sign = normalSign edge_domain
+      edgeOffset = makeIntegerExpr $ case (bcType, fieldStaggered, sign) of
+        (Dirichlet, False, Negative) -> left
+        (_, _, Negative) -> left - 1
+        (_, _, Positive) -> right
+        where
+          perpDimension = case bcAxis of
+            Horizontal -> 1
+            Vertical -> 0
+          left = fromIntegral . fst $ genericIndex margins perpDimension
+          right = left +  genericIndex meshDimensions perpDimension
+      action = case (bcType, fieldStaggered, sign) of
+        (Dirichlet, False, _) -> SetZero
+        (Dirichlet, True, Negative) -> NegateValueAwayFromZero
+        (Dirichlet, True, Positive) -> NegateValueTowardsZero
+        (Neumann, _, Negative) -> CopyValueAwayFromZero
+        (Neumann, _, Positive) -> CopyValueTowardsZero
+      planeLimits = (makeIntegerExpr $ fromIntegral marginLow, makeIntegerExpr $ meshWidth + fromIntegral marginLow)
+        where
+          (marginLow, _marginHigh) = genericIndex margins bcDimension
+          meshWidth = genericIndex meshDimensions bcDimension
+          limits dim = (makeIntegerExpr $ fromIntegral marginLow, makeIntegerExpr $ meshWidth + fromIntegral marginLow)
 
 getScalarFieldName :: FieldLValue -> String
 getScalarFieldName lvalue = case lvalue of
@@ -329,6 +404,10 @@ buildBCDirectiveDictionary :: BCDirective -> Template.Dict
 buildBCDirectiveDictionary bcDirective = Map.fromList $
   [ ("variable", Template.StringVal name)
   , ("axis", Template.StringVal . show $ _bcDirectiveAxis bcDirective)
+  , ("offset", Template.StringVal . renderDSLExpr $ _bcDirectiveOffset bcDirective)
+  , ("low", Template.StringVal . renderDSLExpr $ _bcDirectiveLow bcDirective)
+  , ("high", Template.StringVal . renderDSLExpr $ _bcDirectiveHigh bcDirective)
+  , ("action", Template.StringVal . show $ _bcDirectiveAction bcDirective)
   ]
   where
   name = _bcDirectiveVariable bcDirective

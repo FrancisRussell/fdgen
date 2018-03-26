@@ -3,7 +3,8 @@ module FDGEN.Discrete (buildDiscreteForm, buildTemplateDictionary
                       , numPreviousTimestepsNeeded, DiscreteTerminal(..), Update(..)
                       , scalarizeTensorFields, constantFoldDiscretised
                       , maxTimestepOrder, getTimestepping, TemporalTerminal(..)
-                      , BoundaryCondition(..), EdgeDomain(..), solveGetGhostSizes) where
+                      , BoundaryCondition(..), EdgeDomain(..), solveGetGhostSizes
+                      , meshGetField, BoundaryConditionType(..)) where
 import FDGEN.Algebra (Expression(..), diff, adamsBashforthGeneral, expandSymbols, substSymbols, rewriteFixedPoint, vars)
 import FDGEN.Tensor (Tensor, TensorIndex)
 import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, vListDoc)
@@ -718,7 +719,6 @@ buildUpdate mesh fdfl solve equ = Update
     where
     buildDerivative n (Parser.FieldTemporalDerivative subExpr) = buildDerivative (n + 1) subExpr
     buildDerivative n lValue = FieldTemporalDerivative (findLValue mesh fdfl lValue) n
-
 
 mergeBoundingMap :: Map FieldLValue [(Integer, Integer)] -> Map FieldLValue [(Integer, Integer)] -> Map FieldLValue [(Integer, Integer)]
 mergeBoundingMap a b = foldr (uncurry $ Map.insertWith mergeBoundingRange) a (Map.toList b)
