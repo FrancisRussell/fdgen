@@ -1,5 +1,7 @@
 module FDGEN.Precedence (PDoc(..), Precedence(..), Assoc(..), pAssoc, pPrec, pDoc
-                        , renderTerminal, renderPrefix, renderInfix, renderPrefixMultiParam) where
+                        , renderTerminal, renderPrefix, renderInfix
+                        , renderPrefixMultiParam, makeAtomic) where
+import FDGEN.Pretty
 import Text.PrettyPrint (Doc, hcat, parens)
 import Control.Applicative ((<$>))
 import FDGEN.Pretty (PrettyPrintable(..))
@@ -26,6 +28,9 @@ pDoc :: PDoc -> Doc
 pDoc (PDoc d _ _) = d
 
 data PDoc = PDoc Doc Assoc Precedence
+
+instance PrettyPrintable PDoc where
+  toDoc = pDoc
 
 hasAssociativity :: Assoc -> Bool
 hasAssociativity assoc = case assoc of
@@ -54,6 +59,11 @@ renderInfix (op, prec, assoc) left right = PDoc resultDoc assoc prec
   leftDoc = doBracketing' left
   rightDoc = doBracketing' right
   resultDoc = hcat [leftDoc, toDoc op, rightDoc]
+
+makeAtomic :: PDoc -> PDoc
+makeAtomic term = case pPrec term of
+  AtomPrec -> term
+  PrecLevel _ -> PDoc (parens $ pDoc term) NoAssoc AtomPrec
 
 doBracketing prec assoc term = if pPrec term > prec || pPrec term == prec && pAssoc term == assoc && hasAssociativity assoc
   then pDoc term

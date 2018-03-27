@@ -11,7 +11,9 @@ import FDGEN.Discrete ( Discretised(..), Mesh(..), Field(..), Solve(..)
 import FDGEN.Algebra (Expression(..), PairSeq(..), expandSymbols)
 import Control.Applicative ((<$>))
 import Data.Ratio (numerator, denominator)
-import FDGEN.Precedence (PDoc, pDoc, renderInfix, renderTerminal, Precedence(..), Assoc(..), renderPrefix, renderPrefixMultiParam)
+import FDGEN.Precedence ( PDoc(..), pDoc, renderInfix, renderTerminal
+                        , Precedence(..), Assoc(..), renderPrefix
+                        , renderPrefixMultiParam, makeAtomic)
 import FDGEN.Pretty (PrettyPrintable(..))
 import FDGEN.Util (mergeBoundingRange)
 import Data.Map (Map)
@@ -75,13 +77,22 @@ data ValueSource
   | SetValue DSLExpr
   deriving Show
 
-renderValueSource :: ValueSource -> String
-renderValueSource s = case s of
-  CopyValueTowardsZero -> show s
-  CopyValueAwayFromZero -> show s
-  NegateValueTowardsZero -> show s
-  NegateValueAwayFromZero -> show s
-  SetValue e -> "(SetValue (" ++ renderDSLExpr e ++ "))"
+
+class PDocPrintable a where
+  pDocPrint :: a -> PDoc
+
+instance PDocPrintable PDoc where
+  pDocPrint = id
+
+instance PDocPrintable ValueSource where
+  pDocPrint s = case s of
+    CopyValueTowardsZero -> buildAtom s
+    CopyValueAwayFromZero -> buildAtom s
+    NegateValueTowardsZero -> buildAtom s
+    NegateValueAwayFromZero -> buildAtom s
+    SetValue e -> renderApplication "SetValue" [pDocPrint e]
+    where
+      buildAtom t = PDoc (toDoc $ show t) NoAssoc AtomPrec
 
 getEdgeDomainAxis :: EdgeDomain -> Axis
 getEdgeDomainAxis d = case d of
@@ -120,29 +131,34 @@ translateEdgeDomain d = case d of
 concatMapUniq :: Ord b => (a -> [b]) -> [a] -> [b]
 concatMapUniq f = Set.toList . Set.fromList . concatMap f
 
-renderDSLExpr :: DSLExpr -> String
-renderDSLExpr = prettyPrint . pDoc . renderDSLExpr'
-  where
-  renderDSLExpr' expr = case expr of
-    DSLAdd a b -> renderInfix (" + ", PrecLevel 6, LeftAssoc) (renderDSLExpr' a) (renderDSLExpr' b)
-    DSLSub a b -> renderInfix (" - ", PrecLevel 6, LeftAssoc) (renderDSLExpr' a) (renderDSLExpr' b)
-    DSLMult a b -> renderInfix (" * ", PrecLevel 7, LeftAssoc) (renderDSLExpr' a) (renderDSLExpr' b)
-    DSLDiv a b -> renderInfix (" / ", PrecLevel 7, LeftAssoc) (renderDSLExpr' a) (renderDSLExpr' b)
-    DSLNegate  e -> renderPrefix ("-", PrecLevel 6) (renderDSLExpr' e)
-    DSLIntPower e i -> renderApplication "IntPower" [renderDSLExpr' e, renderNum i]
-    DSLCellVariable name -> renderTerminal name
-    DSLConstant name e -> renderApplication "Constant" [renderTerminal name, renderDSLExpr' e]
-    DSLInt i -> renderApplication "EInt" [renderNum i]
-    DSLDouble d -> renderNum d
-    DSLOffset e x y -> renderApplication "Offset" [renderDSLExpr' e, renderNum x, renderNum y]
-    DSLCurrent e -> renderApplication "Current" [renderDSLExpr' e]
-    DSLCos e -> renderApplication "cos" [renderDSLExpr' e]
-    DSLSin e -> renderApplication "sin" [renderDSLExpr' e]
-  renderNum :: (Show a, Eq a, Num a) => a -> PDoc
-  renderNum n = if signum n == fromInteger (-1)
-    then renderPrefix ("-", PrecLevel 6) (renderTerminal . show $ abs n)
-    else renderTerminal $ show n
-  renderApplication name params = renderPrefixMultiParam (name, PrecLevel 10) params
+renderApplication :: String -> [PDoc] -> PDoc
+renderApplication name params = renderPrefixMultiParam (name, PrecLevel 10) params
+
+renderDSLExpr :: PDocPrintable a => a -> String
+renderDSLExpr = prettyPrint . pDocPrint
+
+instance PDocPrintable DSLExpr where
+  pDocPrint = renderDSLExpr'
+    where
+    renderDSLExpr' expr = case expr of
+      DSLAdd a b -> renderInfix (" + ", PrecLevel 6, LeftAssoc) (renderDSLExpr' a) (renderDSLExpr' b)
+      DSLSub a b -> renderInfix (" - ", PrecLevel 6, LeftAssoc) (renderDSLExpr' a) (renderDSLExpr' b)
+      DSLMult a b -> renderInfix (" * ", PrecLevel 7, LeftAssoc) (renderDSLExpr' a) (renderDSLExpr' b)
+      DSLDiv a b -> renderInfix (" / ", PrecLevel 7, LeftAssoc) (renderDSLExpr' a) (renderDSLExpr' b)
+      DSLNegate  e -> renderPrefix ("-", PrecLevel 6) (renderDSLExpr' e)
+      DSLIntPower e i -> renderApplication "IntPower" [renderDSLExpr' e, renderNum i]
+      DSLCellVariable name -> renderTerminal name
+      DSLConstant name e -> renderApplication "Constant" [renderTerminal name, renderDSLExpr' e]
+      DSLInt i -> renderApplication "EInt" [renderNum i]
+      DSLDouble d -> renderNum d
+      DSLOffset e x y -> renderApplication "Offset" [renderDSLExpr' e, renderNum x, renderNum y]
+      DSLCurrent e -> renderApplication "Current" [renderDSLExpr' e]
+      DSLCos e -> renderApplication "cos" [renderDSLExpr' e]
+      DSLSin e -> renderApplication "sin" [renderDSLExpr' e]
+    renderNum :: (Show a, Eq a, Num a) => a -> PDoc
+    renderNum n = if signum n == fromInteger (-1)
+      then renderPrefix ("-", PrecLevel 6) (renderTerminal . show $ abs n)
+      else renderTerminal $ show n
 
 data DSLExpr
   = DSLAdd DSLExpr DSLExpr
@@ -413,13 +429,15 @@ buildBCDirectiveDictionary :: BCDirective -> Template.Dict
 buildBCDirectiveDictionary bcDirective = Map.fromList $
   [ ("variable", Template.StringVal name)
   , ("axis", Template.StringVal . show $ _bcDirectiveAxis bcDirective)
-  , ("offset", Template.StringVal . renderDSLExpr $ _bcDirectiveOffset bcDirective)
-  , ("low", Template.StringVal . renderDSLExpr $ _bcDirectiveLow bcDirective)
-  , ("high", Template.StringVal . renderDSLExpr $ _bcDirectiveHigh bcDirective)
-  , ("action", Template.StringVal . renderValueSource $ _bcDirectiveAction bcDirective)
+  , ("offset", makeVal $ _bcDirectiveOffset bcDirective)
+  , ("low", makeVal $ _bcDirectiveLow bcDirective)
+  , ("high", makeVal $ _bcDirectiveHigh bcDirective)
+  , ("action", makeVal $ _bcDirectiveAction bcDirective)
   ]
   where
   name = _bcDirectiveVariable bcDirective
+  makeVal :: PDocPrintable a => a -> Template.Val
+  makeVal = Template.StringVal . renderDSLExpr . makeAtomic . pDocPrint
 
 instance Backend FPGADSLBackend
   where
