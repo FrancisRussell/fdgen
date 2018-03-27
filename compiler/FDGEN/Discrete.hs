@@ -273,6 +273,7 @@ data BoundaryCondition = BoundaryCondition
   { _bcType :: BoundaryConditionType
   , _bcField :: FieldLValue
   , _bcRHS :: Tensor (Expression Terminal)
+  , _bcRHSDiscrete :: Tensor (Expression DiscreteTerminal)
   , _bcSubdomains :: [EdgeDomain]
   } deriving Show
 
@@ -282,6 +283,7 @@ instance PrettyPrintable BoundaryCondition
     [ ("type", toDoc $ _bcType bc)
     , ("field", toDoc $ _bcField bc)
     , ("rhs", toDoc $ _bcRHS bc)
+    , ("rhs_discrete", toDoc $ _bcRHSDiscrete bc)
     , ("subdomains", vListDoc $ _bcSubdomains bc)
     ]
 
@@ -314,8 +316,12 @@ doSpatialDiscretisation :: Mesh -> Mesh
 doSpatialDiscretisation = updateMesh
   where
   updateMesh mesh = mesh { _meshSolves = updateSolve mesh <$> _meshSolves mesh }
-  updateSolve mesh solve = solve { _solveUpdates = updateUpdate mesh solve <$> _solveUpdates solve }
+  updateSolve mesh solve = solve
+    { _solveUpdates = updateUpdate mesh solve <$> _solveUpdates solve
+    , _solveBoundaryConditions = updateBoundaryCondition mesh solve <$> _solveBoundaryConditions solve
+    }
   updateUpdate mesh solve update = update { _updateRHSDiscrete = buildRHSDiscrete mesh solve update }
+  updateBoundaryCondition _mesh _solve bc = bc { _bcRHSDiscrete = discretiseMeshConstantExpr <$> _bcRHS bc }
 
 constantFoldDiscretised :: Discretised -> Discretised
 constantFoldDiscretised d = d
@@ -337,6 +343,7 @@ constantFoldDiscretised d = d
     }
   updateBC _mesh _solve bc = bc
     { _bcRHS = substTerminals <$> _bcRHS bc
+    , _bcRHSDiscrete = substDiscreteTerminals <$> _bcRHSDiscrete bc
     }
   substTerminals = substLiterals (_discretisedLiterals d) (\name -> ConstantRef name [])
   substDiscreteTerminals = substLiterals (_discretisedLiterals d) (\name -> ConstantDataRef name [])
@@ -505,6 +512,7 @@ buildBoundaryCondition mesh fdfl _solve bc = BoundaryCondition
   { _bcType = bcType
   , _bcField = bcField
   , _bcRHS = buildTensorRValue mesh fdfl $ Parser._bcRHS bc
+  , _bcRHSDiscrete = error "buildBoundaryCondition: spatial discretisation not yet applied"
   , _bcSubdomains = bcSubdomains
   }
   where

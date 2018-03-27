@@ -72,8 +72,16 @@ data ValueSource
   | CopyValueAwayFromZero
   | NegateValueTowardsZero
   | NegateValueAwayFromZero
-  | SetZero
+  | SetValue DSLExpr
   deriving Show
+
+renderValueSource :: ValueSource -> String
+renderValueSource s = case s of
+  CopyValueTowardsZero -> show s
+  CopyValueAwayFromZero -> show s
+  NegateValueTowardsZero -> show s
+  NegateValueAwayFromZero -> show s
+  SetValue e -> "(SetValue (" ++ renderDSLExpr e ++ "))"
 
 getEdgeDomainAxis :: EdgeDomain -> Axis
 getEdgeDomainAxis d = case d of
@@ -217,6 +225,7 @@ bcToDirectives _discretised mesh solve bc = buildDirective <$> edge_domains
     where
       bcAxis = getEdgeDomainAxis edge_domain
       bcDimension = axisDimension bcAxis
+      bcValue = buildDSLExpr expandDiscreteTerminal . Tensor.asScalar $ _bcRHSDiscrete bc
       fieldLValue = _bcField bc
       fieldName = getScalarFieldName fieldLValue
       bcType = _bcType bc
@@ -239,7 +248,7 @@ bcToDirectives _discretised mesh solve bc = buildDirective <$> edge_domains
           left = fromIntegral . fst $ genericIndex margins perpDimension
           right = left +  genericIndex meshDimensions perpDimension
       action = case (bcType, fieldStaggered, sign) of
-        (Dirichlet, False, _) -> SetZero
+        (Dirichlet, False, _) -> SetValue bcValue
         (Dirichlet, True, Negative) -> NegateValueAwayFromZero
         (Dirichlet, True, Positive) -> NegateValueTowardsZero
         (Neumann, _, Negative) -> CopyValueAwayFromZero
@@ -407,7 +416,7 @@ buildBCDirectiveDictionary bcDirective = Map.fromList $
   , ("offset", Template.StringVal . renderDSLExpr $ _bcDirectiveOffset bcDirective)
   , ("low", Template.StringVal . renderDSLExpr $ _bcDirectiveLow bcDirective)
   , ("high", Template.StringVal . renderDSLExpr $ _bcDirectiveHigh bcDirective)
-  , ("action", Template.StringVal . show $ _bcDirectiveAction bcDirective)
+  , ("action", Template.StringVal . renderValueSource $ _bcDirectiveAction bcDirective)
   ]
   where
   name = _bcDirectiveVariable bcDirective
