@@ -11,13 +11,13 @@ import FDGEN.Discrete ( Discretised(..), Mesh(..), Field(..), Solve(..)
 import FDGEN.Algebra (Expression(..), PairSeq(..), expandSymbols)
 import Control.Applicative ((<$>))
 import Data.Ratio (numerator, denominator)
-import FDGEN.Precedence ( PDoc(..), pDoc, renderInfix, renderTerminal
+import FDGEN.Precedence ( PDoc(..), renderInfix, renderTerminal
                         , Precedence(..), Assoc(..), renderPrefix
                         , renderPrefixMultiParam, makeAtomic)
 import FDGEN.Pretty (PrettyPrintable(..))
 import FDGEN.Util (mergeBoundingRange)
 import Data.Map (Map)
-import Data.List (genericReplicate, genericIndex)
+import Data.List (genericReplicate)
 import qualified FDGEN.Template as Template
 import qualified FDGEN.Tensor as Tensor
 import qualified FDGEN.Discrete as Discrete
@@ -70,10 +70,10 @@ data MeshInfo = MeshInfo
   } deriving Show
 
 data ValueSource
-  = CopyValueTowardsZero
-  | CopyValueAwayFromZero
-  | NegateValueTowardsZero
-  | NegateValueAwayFromZero
+  = CopyValueTowardsZero DSLExpr
+  | CopyValueAwayFromZero DSLExpr
+  | NegateValueTowardsZero DSLExpr
+  | NegateValueAwayFromZero DSLExpr
   | SetValue DSLExpr
   deriving Show
 
@@ -86,13 +86,15 @@ instance PDocPrintable PDoc where
 
 instance PDocPrintable ValueSource where
   pDocPrint s = case s of
-    CopyValueTowardsZero -> buildAtom s
-    CopyValueAwayFromZero -> buildAtom s
-    NegateValueTowardsZero -> buildAtom s
-    NegateValueAwayFromZero -> buildAtom s
+    CopyValueTowardsZero e -> buildZeroAtom "CopyValueTowardsZero" e
+    CopyValueAwayFromZero e -> buildZeroAtom "CopyValueAwayFromZero" e
+    NegateValueTowardsZero e -> buildZeroAtom "NegateValueTowardsZero" e
+    NegateValueAwayFromZero e -> buildZeroAtom "NegateValueAwayFromZero" e
     SetValue e -> renderApplication "SetValue" [pDocPrint e]
     where
-      buildAtom t = PDoc (toDoc $ show t) NoAssoc AtomPrec
+      buildZeroAtom name e = case e of
+        0 -> PDoc (toDoc name) NoAssoc AtomPrec
+        _ -> error $ "Directive " ++ name ++ " used with " ++ show e ++ " but doesn't support non-zero values yet"
 
 getEdgeDomainAxis :: EdgeDomain -> Axis
 getEdgeDomainAxis d = case d of
@@ -101,7 +103,7 @@ getEdgeDomainAxis d = case d of
   TopEdge -> Horizontal
   BottomEdge -> Horizontal
 
-axisDimension :: Axis -> Integer
+axisDimension :: Axis -> Int
 axisDimension Horizontal = 0
 axisDimension Vertical = 1
 
@@ -241,7 +243,11 @@ bcToDirectives _discretised mesh solve bc = buildDirective <$> edge_domains
     where
       bcAxis = getEdgeDomainAxis edge_domain
       bcDimension = axisDimension bcAxis
-      bcValue = buildDSLExpr expandDiscreteTerminal . Tensor.asScalar $ _bcRHSDiscrete bc
+      bcValue = Tensor.asScalar $ _bcRHSDiscrete bc
+      bcValueDSL = buildDSLExpr expandDiscreteTerminal bcValue
+      bcValueDoubledDSL = buildDSLExpr expandDiscreteTerminal $ bcValue * 2
+      bcValueScaledDSL = buildDSLExpr expandDiscreteTerminal $ bcValue * spacing
+      spacing = (_meshGridSpacing mesh) !! bcDimension
       fieldLValue = _bcField bc
       fieldName = getScalarFieldName fieldLValue
       bcType = _bcType bc
@@ -251,7 +257,7 @@ bcToDirectives _discretised mesh solve bc = buildDirective <$> edge_domains
       ghostSizes = mergeGhostSizes meshDimension $ solveGetGhostSizes solve
       margins = (\(a,b) -> (abs a, abs b)) <$> ghostSizes
       field = meshGetField mesh fieldName
-      fieldStaggered = genericIndex (getSingleton "stagger" $ _fieldStaggerSpatial field) bcDimension
+      fieldStaggered = (getSingleton "stagger" $ _fieldStaggerSpatial field) !! bcDimension
       sign = normalSign edge_domain
       edgeOffset = makeIntegerExpr $ case (bcType, fieldStaggered, sign) of
         (Dirichlet, False, Negative) -> left
@@ -261,19 +267,18 @@ bcToDirectives _discretised mesh solve bc = buildDirective <$> edge_domains
           perpDimension = case bcAxis of
             Horizontal -> 1
             Vertical -> 0
-          left = fromIntegral . fst $ genericIndex margins perpDimension
-          right = left +  genericIndex meshDimensions perpDimension
+          left = fromIntegral . fst $ margins !! perpDimension
+          right = left + meshDimensions !! perpDimension
       action = case (bcType, fieldStaggered, sign) of
-        (Dirichlet, False, _) -> SetValue bcValue
-        (Dirichlet, True, Negative) -> NegateValueAwayFromZero
-        (Dirichlet, True, Positive) -> NegateValueTowardsZero
-        (Neumann, _, Negative) -> CopyValueAwayFromZero
-        (Neumann, _, Positive) -> CopyValueTowardsZero
+        (Dirichlet, False, _) -> SetValue bcValueDSL
+        (Dirichlet, True, Negative) -> NegateValueAwayFromZero bcValueDoubledDSL
+        (Dirichlet, True, Positive) -> NegateValueTowardsZero bcValueDoubledDSL
+        (Neumann, _, Negative) -> CopyValueAwayFromZero bcValueScaledDSL
+        (Neumann, _, Positive) -> CopyValueTowardsZero bcValueScaledDSL
       planeLimits = (makeIntegerExpr $ fromIntegral marginLow, makeIntegerExpr $ meshWidth + fromIntegral marginLow)
         where
-          (marginLow, _marginHigh) = genericIndex margins bcDimension
-          meshWidth = genericIndex meshDimensions bcDimension
-          limits dim = (makeIntegerExpr $ fromIntegral marginLow, makeIntegerExpr $ meshWidth + fromIntegral marginLow)
+          (marginLow, _marginHigh) = margins !! bcDimension
+          meshWidth = meshDimensions !! bcDimension
 
 getScalarFieldName :: FieldLValue -> String
 getScalarFieldName lvalue = case lvalue of
