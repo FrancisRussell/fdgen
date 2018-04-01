@@ -1,7 +1,6 @@
 module FDGEN.Precedence (PDoc(..), Precedence(..), Assoc(..), pAssoc, pPrec, pDoc
                         , renderTerminal, renderPrefix, renderInfix
                         , renderPrefixMultiParam, makeAtomic) where
-import FDGEN.Pretty
 import Text.PrettyPrint (Doc, hcat, parens)
 import Control.Applicative ((<$>))
 import FDGEN.Pretty (PrettyPrintable(..))

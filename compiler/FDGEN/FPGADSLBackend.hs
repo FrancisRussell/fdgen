@@ -93,8 +93,11 @@ instance PDocPrintable ValueSource where
     SetValue e -> renderApplication "SetValue" [pDocPrint e]
     where
       buildZeroAtom name e = case e of
-        0 -> PDoc (toDoc name) NoAssoc AtomPrec
+        DSLInt 0 -> zeroAtom
+        DSLDouble 0.0 -> zeroAtom
         _ -> error $ "Directive " ++ name ++ " used with " ++ show e ++ " but doesn't support non-zero values yet"
+        where
+          zeroAtom = PDoc (toDoc name) NoAssoc AtomPrec
 
 getEdgeDomainAxis :: EdgeDomain -> Axis
 getEdgeDomainAxis d = case d of
