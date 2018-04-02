@@ -4,7 +4,8 @@ module FDGEN.Parser ( parseInput, FDFL, getSymbols, Definition(..)
                     , getSymbol, Field(..), Solve(..), Equation(..)
                     , FieldExpr(..), getFieldDef, LiteralConstant(..)
                     , MeshConstant(..), Identifier(..), StaggerStrategy(..)
-                    , BoundaryCondition(..), NamedLiteral(..)) where
+                    , BoundaryCondition(..), NamedLiteral(..)
+                    , StringLiteral) where
 import Data.Char (toLower)
 import Data.Map (Map)
 import Data.Maybe (isJust)

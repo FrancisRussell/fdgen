@@ -33,6 +33,9 @@ data Expression e
   | Diff (Expression e) e Integer
   | Int (Expression e) e
   | Function e [Expression e]
+  | Power (Expression e) (Expression e)
+  | Euler
+  | Pi
   deriving (Show, Eq, Ord)
 
 data RewriteState
@@ -205,6 +208,7 @@ simplify (Product seq') = simplify' $ simplifyPairSeq seq'
 simplify (Sum seq') = simplify' $ simplifyPairSeq seq'
 simplify (Abs e) = simplify' . Abs $ simplify e
 simplify (Signum e) = simplify' . Signum $ simplify e
+simplify (Power a b) = simplify' $ Power (simplify a) (simplify b)
 simplify e = simplify' e
 
 simplify' :: Ord e => Expression e -> Expression e
@@ -217,6 +221,7 @@ simplify' (Int e sym) = integrate' sym e
 simplify' expr@(Product seq') = case _psOverall seq' of
   0 -> 0
   _ -> expr
+simplify' (Power f (ConstantRational g)) = simplify $ raise f g
 simplify' e = e
 
 rewrite :: Ord e => (Expression e -> Expression e) -> Expression e -> Expression e
@@ -236,9 +241,12 @@ rewrite' f (Ln e) = Ln . simplify' $ rewrite f e
 rewrite' f (Diff e sym n) = Diff (simplify' $ rewrite f e) (rewriteSymbol f sym) n
 rewrite' f (Int e sym) = Int (simplify' $ rewrite f e) (rewriteSymbol f sym)
 rewrite' f (Function sym params) = Function (rewriteSymbol f sym) $ (simplify' . rewrite f) <$> params
+rewrite' f (Power a b) = Power (simplify' $ rewrite f a) (simplify' $ rewrite f b)
 rewrite' _ e@(Symbol _) = e
 rewrite' _ e@(ConstantFloat _) = e
 rewrite' _ e@(ConstantRational _) = e
+rewrite' _ e@Euler = e
+rewrite' _ e@Pi = e
 
 rewriteSymbol :: (Expression e -> Expression f) -> e -> f
 rewriteSymbol f sym = case f (Symbol sym) of
@@ -266,6 +274,9 @@ expandSymbols f expr = simplify $ case expr of
   Diff e sym i -> Diff (expandSymbols f e) (replaceSymbol sym) i
   Int e sym -> Int (expandSymbols f e) (replaceSymbol sym)
   Function sym params -> Function (replaceSymbol sym) (expandSymbols f <$> params)
+  Power a b -> Power (expandSymbols f a) (expandSymbols f b)
+  Euler -> Euler
+  Pi -> Pi
   where
   transformPair (e, r) = (expandSymbols f e, r)
   replaceSymbol sym = case f sym of
@@ -292,6 +303,8 @@ depends syms (Product seq') =
   foldl (||) False $ map (\(a, _) -> depends syms a) $ toPairs seq'
 depends _ (ConstantFloat _) = False
 depends _ (ConstantRational _) = False
+depends _ Euler = False
+depends _ Pi = False
 depends syms (Abs expr) = depends syms expr
 depends syms (Signum expr) = depends syms expr
 depends syms (Ln expr) = depends syms expr
@@ -299,6 +312,7 @@ depends syms (Diff e _sym _) = depends syms e
 depends syms (Int e sym) = Set.member sym syms || depends syms e
 depends syms (Function sym params) =
   foldl (||) (Set.member sym syms) (depends syms <$> params)
+depends syms (Power a b) = depends syms a || depends syms b
 
 vars :: Ord e => Expression e -> Set e
 vars (Symbol s) = Set.singleton s
@@ -308,12 +322,15 @@ vars (Product seq') =
   foldl (Set.union) Set.empty $ map (\(a, _) -> vars a) (toPairs seq')
 vars (ConstantFloat _) = Set.empty
 vars (ConstantRational _) = Set.empty
+vars Euler = Set.empty
+vars Pi = Set.empty
 vars (Abs expr) = vars expr
 vars (Signum expr) = vars expr
 vars (Ln expr) = vars expr
 vars (Diff e _sym _) = vars e
 vars (Int e sym) = Set.insert sym (vars e)
 vars (Function sym params) = foldl Set.union (Set.singleton sym) (vars <$> params)
+vars (Power a b) = Set.union (vars a) (vars b)
 
 polyCoeff :: Ord e => Expression e -> e -> Int -> Maybe (Expression e)
 polyCoeff expr sym power = (!! power) <$> (++ repeat 0) <$> polyCoeffs expr sym
@@ -356,12 +373,15 @@ polyCoeffs expr sym = if depends (Set.singleton sym) expr
     foldl (liftM2 multiplyCoeffs) (Just [1.0]) $ map (\(a, p) -> (flip raiseCoeffs $ p) =<< (polyCoeffs a sym)) (toPairs seq')
   polyCoeffs' n@(ConstantFloat _) = Just [n]
   polyCoeffs' n@(ConstantRational _) = Just [n]
+  polyCoeffs' n@Euler = Just [n]
+  polyCoeffs' n@Pi = Just [n]
   polyCoeffs' (Abs _expr) = Nothing
   polyCoeffs' (Signum _expr) = Nothing
   polyCoeffs' (Ln _expr) = Nothing
   polyCoeffs' (Diff _expr _sym _power) = Nothing
   polyCoeffs' (Int _expr _sym) = Nothing
   polyCoeffs' (Function _sym _params) = Nothing
+  polyCoeffs' (Power _a _b) = Nothing
 
 extractElem :: [a] -> Int -> (a, [a])
 extractElem lst index = (elem', rest)
@@ -376,6 +396,8 @@ diff' :: Ord e => e -> Expression e -> Expression e
 diff' sym expression = case expression of
   ConstantFloat _ -> 0
   ConstantRational _ -> 0
+  Euler -> 0
+  Pi -> 0
   Symbol s -> if s == sym then 1 else 0
   Abs x -> Signum x * diff sym x
   Signum _ -> 0
@@ -397,6 +419,9 @@ diff' sym expression = case expression of
     then e
     else diffNoun
   Function _ _ -> diffNoun
+  Power f g -> expression * b
+    where
+    b = (diff sym f) * g / f + (diff sym g) * Ln f
   where
   diffNoun = if depends (Set.singleton sym) expression
     then Diff expression sym 1
@@ -431,6 +456,8 @@ integrate' sym expr = case expr of
   Ln _ -> integrateByParts sym expr 1
   ConstantFloat _ -> Symbol sym * expr
   ConstantRational _ -> Symbol sym * expr
+  Euler -> Symbol sym * Euler
+  Pi -> Symbol sym * Pi
   Symbol s -> if s == sym
     then (Symbol s ^ (2 :: Integer)) * (fromRational $ 1 % 2)
     else Symbol s * Symbol sym
@@ -444,6 +471,7 @@ integrate' sym expr = case expr of
   Diff _ _ _ -> intNoun
   Int _ _ -> intNoun
   Function _ _ -> intNoun
+  Power _ _ -> intNoun
   where
   intNoun = if depends (Set.singleton sym) expr
     then Int expr sym
@@ -582,6 +610,22 @@ instance Ord e => Fractional (Expression e) where
   fromRational = ConstantRational
   (/) a = simplify . divide a
 
+instance Ord e => Floating (Expression e) where
+  pi = Pi
+  exp = simplify . Power Euler
+  log = Ln
+  (**) a = simplify . Power a
+  sin = error "sin: unimplemented"
+  cos = error "cos: unimplemented"
+  asin = error "asin: unimplemented"
+  acos = error "acos: unimplemented"
+  atan = error "atan: unimplemented"
+  sinh = error "sinh: unimplemented"
+  cosh = error "cosh: unimplemented"
+  asinh = error "asinh: unimplemented"
+  acosh = error "acosh: unimplemented"
+  atanh = error "atanh: unimplemented"
+
 mulPrec = PrecLevel 2
 addPrec = PrecLevel 1
 powPrec = PrecLevel 0
@@ -630,3 +674,6 @@ instance PrettyPrintable e => PrettyPrintable (Expression e) where
         else [renderTerminal i]
       Int e s -> renderFunction "int" [toPDoc e, renderTerminal s]
       Function sym params -> renderFunction (prettyPrint sym) (toPDoc <$> params)
+      Power a b -> renderFunction "pow" [toPDoc a, toPDoc b]
+      Euler -> renderTerminal "e"
+      Pi -> renderTerminal "pi"

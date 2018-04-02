@@ -133,6 +133,8 @@ data Mesh = Mesh
   , _meshSolves :: [Solve]
   , _meshGridSpacing :: [Expression DiscreteTerminal]
   , _meshDimensions :: [Expression DiscreteTerminal]
+  , _meshInitialValues :: [(String, Tensor (Expression Terminal))]
+  , _meshInitialValuesDiscrete :: [(String, Expression DiscreteTerminal)]
   } deriving Show
 
 instance PrettyPrintable Mesh
@@ -144,6 +146,7 @@ instance PrettyPrintable Mesh
     , ("solves", vListDoc $ _meshSolves mesh)
     , ("grid_spacing", hListDoc $ _meshGridSpacing mesh)
     , ("dimensions", hListDoc $ _meshDimensions mesh)
+    , ("initial", structureDoc "Map" $ (\(a,b) -> (a, toDoc b)) <$> _meshInitialValues mesh)
     ]
 
 data Field = Field
@@ -372,6 +375,7 @@ scalarizeTensorFields m = updateMesh m
   updateMesh mesh = mesh
     { _meshFields = updateField mesh `concatMap` _meshFields mesh
     , _meshSolves = updateSolve mesh <$> _meshSolves mesh
+    , _meshInitialValues = updateInitial mesh `concatMap` _meshInitialValues mesh
     }
   updateField _mesh field = [genScalarField field suffix staggering | (staggering, suffix) <- zip (_fieldStaggerSpatial field) suffixes]
     where
@@ -382,6 +386,15 @@ scalarizeTensorFields m = updateMesh m
       , _fieldStaggerSpatial = [staggering]
       , _fieldRank = 0
       }
+  updateInitial mesh (fieldName, expr) = genUpdate <$> suffixes
+    where
+    field = meshGetField mesh fieldName
+    rank = _fieldRank field
+    suffixes = genIndices [] rank
+    genUpdate suffix = (genFlattenedName (_fieldName field) suffix, Tensor.generateTensor dim 0 (const rhs'))
+      where
+      rhs = Tensor.getElement expr suffix
+      rhs' = substSymbols flattenTerminal rhs
   updateSolve mesh solve = solve
     { _solveUpdates = updateUpdate mesh solve `concatMap` _solveUpdates solve
     , _solveBoundaryConditions = updateBC mesh solve `concatMap` _solveBoundaryConditions solve
@@ -446,10 +459,16 @@ buildMesh _ fdfl parserMesh = mesh
     , _meshSolves = error "buildMesh: solves not yet populated"
     , _meshGridSpacing = buildPerMeshDimensionScalar $ Parser._meshGridSpacing parserMesh
     , _meshDimensions = buildPerMeshDimensionScalar $ Parser._meshGridDimensions parserMesh
+    , _meshInitialValues = error "buildMesh: initial fields not yet populated"
+    , _meshInitialValuesDiscrete = error "buildMesh: spatial discretisation not yet applied"
     }
   meshFields = (buildField meshNoFields fdfl . Parser.getFieldDef fdfl) <$> (Parser._meshFields parserMesh)
-  meshNoSolves = meshNoFields
+  meshNoInitials = meshNoFields
     { _meshFields = meshFields
+    }
+  meshInitialValues = (buildInitialValue meshNoInitials fdfl) <$> (Parser._meshInitialValues parserMesh)
+  meshNoSolves = meshNoInitials
+    { _meshInitialValues = meshInitialValues
     }
   meshSolves = (buildSolve meshNoSolves fdfl . getSolveDef) <$> (Parser._meshSolves parserMesh)
   mesh = meshNoSolves
@@ -494,6 +513,12 @@ buildField mesh _ field = Field
     Parser.Dimension -> case rank of
       1 -> [genericReplicate n False ++ [True] ++ genericReplicate (dimension-1-n) False | n <- [0..dimension-1]]
       _ -> error $ "Dimension staggering strategy is only defined for rank 1 tensors (" ++ name ++ ")."
+
+buildInitialValue :: Mesh -> Parser.FDFL -> (Parser.StringLiteral, Parser.FieldExpr Parser.Identifier) -> (String, Tensor (Expression Terminal))
+buildInitialValue mesh fdfl (pName, pExpr) = (fieldName, fieldExpr)
+  where
+  fieldName = Parser.stringLiteralValue pName
+  fieldExpr = buildTensorRValue mesh fdfl pExpr
 
 meshGetField :: Mesh -> String -> Field
 meshGetField mesh name = case filter (\f -> _fieldName f == name) (_meshFields mesh) of
@@ -648,9 +673,16 @@ buildTensorRValue mesh fdfl expr = case expr of
     Just _ -> error $ "buildTensorRValue: unable to treat symbol as field: " ++ Parser.identifierValue ref
     Nothing -> error $ "buildTensorRValue: unknown symbol " ++ Parser.identifierValue ref
   Parser.FieldTensorElements elements -> Tensor.fromSubTensors $ buildRValue <$> elements
+  Parser.FieldPower a b -> genScalar $ a' ** b'
+    where
+    a' = Tensor.asScalar $ buildRValue a
+    b' = Tensor.asScalar $ buildRValue b
+  Parser.FieldExponent a -> genScalar $ exp (Tensor.asScalar $ buildRValue a)
+  Parser.FieldPosition -> position
   where
   dimension = _meshDimension mesh
   nabla = genNabla dimension
+  position = Tensor.constructTensor dimension 1 $ Symbol . Direction <$> [0..dimension - 1]
   buildRValue = buildTensorRValue mesh fdfl
   genScalar s = Tensor.constructTensor dimension 0 [s]
   genDerivative :: Integer -> Expression Terminal -> Expression Terminal
