@@ -16,4 +16,8 @@ HeightBC = BoundaryCondition(Dn(h), 0)
 TimeStep = Solve(name="step", spatial_order=1, temporal_order=3, equations=[VelocityEq, HeightEq], 
   boundary_conditions=[VelocityBC_H, VelocityBC_V, HeightBC], delta_t=dt)
 
-m = Mesh(name="shallow_water", dimension=2, fields=[u, h], solves=[TimeStep], spacing=[hx, hx], dimensions=[nx, nx])
+sigmax = pow(pos[0] - (nx * hx) / 2.0, 2) / pow(3.0 * nx * hx / 20.0, 2)
+sigmay = pow(pos[1] - (nx * hx) / 2.0, 2) / pow(3.0 * nx * hx / 20.0, 2)
+
+m = Mesh(name="shallow_water", dimension=2, fields=[u, h], solves=[TimeStep], spacing=[hx, hx], 
+  dimensions=[nx, nx], initial=[("height", 100 * exp(-sigmax - sigmay))])

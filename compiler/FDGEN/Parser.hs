@@ -18,7 +18,7 @@ import Text.Parsec (ParsecT, ParseError, runParser, getState, Parsec, putState, 
 import Text.Parsec.Prim (many, parserFail)
 import Text.Parsec.Expr (buildExpressionParser, Operator(..), Assoc(..))
 import Text.Parsec.Token (GenTokenParser(..), GenLanguageDef(..), makeTokenParser)
-import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc)
+import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, hPairDoc)
 import qualified Control.Lens as Lens
 import qualified Data.Map as Map
 import qualified Data.Set as Set
@@ -49,6 +49,7 @@ data Mesh = Mesh
   , _meshSolves :: [Identifier]
   , _meshGridSpacing :: [FieldExpr Identifier]
   , _meshGridDimensions :: [FieldExpr Identifier]
+  , _meshInitialValues :: [(StringLiteral, FieldExpr Identifier)]
 } deriving Show
 
 instance PrettyPrintable Mesh
@@ -60,6 +61,7 @@ instance PrettyPrintable Mesh
     , ("solves", hListDoc $ _meshSolves mesh)
     , ("spacing", hListDoc $ _meshGridSpacing mesh)
     , ("dimensions", hListDoc $ _meshGridDimensions mesh)
+    , ("initial", hListDoc $ hPairDoc <$> _meshInitialValues mesh)
     ]
 
 data Field = Field {
@@ -95,6 +97,9 @@ data FieldExpr a
   | FieldNormalDerivative (FieldExpr a)
   | FieldIndexOperation [Integer] (FieldExpr a)
   | FieldTensorElements [FieldExpr a]
+  | FieldPower (FieldExpr a) (FieldExpr a)
+  | FieldExponent (FieldExpr a)
+  | FieldPosition
   deriving Show
 
 instance PrettyPrintable a => PrettyPrintable (FieldExpr a)
@@ -115,6 +120,9 @@ instance PrettyPrintable a => PrettyPrintable (FieldExpr a)
     FieldLiteral PermutationSymbol -> text "epsilon"
     FieldIndexOperation indices a -> hcat [toDoc a , hListDoc indices]
     FieldTensorElements elements -> hcat [text "[", printList elements, text "]"]
+    FieldPower a b -> function "pow" [toDoc a, toDoc b]
+    FieldExponent a -> function "exp" [toDoc a]
+    FieldPosition -> text "pos"
     where
       text = PrettyPrint.text
       hcat = PrettyPrint.hcat
@@ -374,6 +382,7 @@ parseMesh = ObjectParseSpec "Mesh" []
   , buildAttributeSpec "solves" True (validateList isSolve >=> noDuplicates) meshSolves
   , buildAttributeSpec "spacing" True alwaysValid meshGridSpacing
   , buildAttributeSpec "dimensions" True alwaysValid meshGridDimensions
+  , buildAttributeSpec "initial" True alwaysValid meshInitialValues
   ]
 
 parseEquation :: ObjectParseSpec Equation
@@ -480,7 +489,8 @@ instance FDFLObject Mesh where
     , _meshFields = []
     , _meshSolves = []
     , _meshGridSpacing = error "undefined meshGridSpacing"
-    , _meshGridDimensions = error "undefined mesgGridDimensions"
+    , _meshGridDimensions = error "undefined meshGridDimensions"
+    , _meshInitialValues = []
     }
 
 instance FDFLObject Equation where
@@ -532,6 +542,13 @@ instance FDFLParsable s => FDFLParsable [s] where
 instance FDFLParsable s => FDFLParsable (Maybe s) where
   parse = Just <$> parse
 
+instance (FDFLParsable a, FDFLParsable b) => FDFLParsable (a, b) where
+  parse = parseParens $ do
+    a <- parse
+    _ <- parseComma
+    b <- parse
+    return (a, b)
+
 instance FDFLParsable (FieldExpr Identifier) where
   parse = expr
     where
@@ -542,12 +559,15 @@ instance FDFLParsable (FieldExpr Identifier) where
       , parseUnary "laplace" (FieldDivergence . FieldGradient)
       , parseUnary "Dt" FieldTemporalDerivative
       , parseUnary "Dn" FieldNormalDerivative
+      , parseUnary "exp" FieldExponent
       , parseBinary "inner" FieldInner
       , parseBinary "outer" FieldOuter
       , parseBinary "dot" FieldDot
+      , parseBinary "pow" FieldPower
       , parseUnary "Dx" $ flip FieldSpatialDerivative 0
       , parseUnary "Dy" $ flip FieldSpatialDerivative 1
       , parseUnary "Dz" $ flip FieldSpatialDerivative 2
+      , parseReserved "pos" >> return FieldPosition
       , FieldLiteral <$> parse
       , FieldRef <$> (parse >>= isFieldLike)
       , parseParens expr

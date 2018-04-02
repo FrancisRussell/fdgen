@@ -1,6 +1,6 @@
 {-# LANGUAGE TypeSynonymInstances, FlexibleInstances #-}
 module FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc
-                    , vListDoc) where
+                    , vListDoc, hPairDoc) where
 
 import Control.Applicative ((<$>))
 import Text.PrettyPrint ( Doc, renderStyle, Style(..), Mode(..), text
@@ -41,6 +41,9 @@ structureDoc name fields = text name $+$ text "{" $+$ nest 2 fieldsDoc $+$ text 
 
 hListDoc :: PrettyPrintable e => [e] -> Doc
 hListDoc elements = text "[" <> (hcat $ punctuate (text ", ") (toDoc <$> elements)) <> text "]"
+
+hPairDoc :: (PrettyPrintable a, PrettyPrintable b) => (a, b) -> Doc
+hPairDoc (a, b) = text "(" <> toDoc a <> text ", " <> toDoc b <> text "]"
 
 vListDoc :: PrettyPrintable e => [e] -> Doc
 vListDoc elements = foldl ($+$) empty $ (indent $ toDoc <$> elements) ++ [text "]"]
