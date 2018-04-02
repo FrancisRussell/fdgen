@@ -626,9 +626,10 @@ instance Ord e => Floating (Expression e) where
   acosh = error "acosh: unimplemented"
   atanh = error "atanh: unimplemented"
 
+powPrec = PrecLevel 4
+unaryPrec = PrecLevel 3
 mulPrec = PrecLevel 2
 addPrec = PrecLevel 1
-powPrec = PrecLevel 0
 
 instance PrettyPrintable e => PrettyPrintable (Expression e) where
   toDoc expr = pDoc $ toPDoc expr
@@ -636,7 +637,7 @@ instance PrettyPrintable e => PrettyPrintable (Expression e) where
     renderInteger :: Integer -> PDoc
     renderInteger i = if i >= 0
       then PDoc (toDoc i) NoAssoc AtomPrec
-      else PDoc (hcat [char '-', toDoc (-i)]) NoAssoc addPrec
+      else PDoc (hcat [char '-', toDoc (-i)]) NoAssoc unaryPrec
     renderRational r = case denominator r of
        1 -> renderInteger $ numerator r
        _ -> renderDivision (renderInteger $ numerator r) (renderInteger $ denominator r)
