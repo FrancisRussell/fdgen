@@ -383,6 +383,8 @@ buildDSLExpr translateSymbol = buildDSLExpr' . expandSymbols translateSymbol
     Product seq' -> buildPairSeq (1, (*)) (1, raiseInt) seq'
     ConstantFloat f -> DSLDouble f
     ConstantRational r -> DSLDouble $ fromRational r
+    Pi -> DSLDouble pi
+    Euler -> DSLDouble $ exp 1
     Abs _ -> error $ "unhandled expression: " ++ show e
     Signum _ -> error $ "unhandled expression: " ++ show e
     Ln _ -> error $ "unhandled expression: " ++ show e
