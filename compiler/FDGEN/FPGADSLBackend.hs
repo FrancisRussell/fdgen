@@ -327,6 +327,7 @@ fieldToCellVariables meshInfo _discretised mesh solve field = (cellVariable:cell
   numDerivativesNeeded = numPreviousTimestepsNeeded update maxTemporalOrder
   numDerivativesStored = max numDerivativesNeeded 1
   name = _fieldName field
+  staggering = getSingleton "stagger" $ _fieldStaggerSpatial field
   cellVariableDerivatives = [cellVariableDerivative n | n <- [0..numDerivativesStored-1]]
   cellVariable = CellVariable
     { _cellVariableName = name
@@ -347,7 +348,7 @@ fieldToCellVariables meshInfo _discretised mesh solve field = (cellVariable:cell
   getInitialExpr = initialDSLExpr
     where
     initial = Tensor.asScalar <$> meshGetInitialValue mesh name
-    initialDSLExpr = buildDSLExpr (expandTerminal meshInfo) <$> initial
+    initialDSLExpr = buildDSLExpr (expandTerminal meshInfo staggering) <$> initial
 
 expandDiscreteTerminal :: DiscreteTerminal -> Expression DSLExpr
 expandDiscreteTerminal s = Symbol $ case s of
@@ -358,13 +359,18 @@ expandDiscreteTerminal s = Symbol $ case s of
     ConstantDataRef _ _ -> error $ "No non-literal constants expected in FPGA backend (was constant folding applied?): " ++ show s
     FieldDataRef _ _ _  -> error $ "Expected no indices for field index expression (were tensor fields scalarized?): " ++ show s
 
-expandTerminal :: MeshInfo -> Discrete.Terminal -> Expression DSLExpr
-expandTerminal meshInfo t = case t of
+expandTerminal :: MeshInfo -> [Bool] -> Discrete.Terminal -> Expression DSLExpr
+expandTerminal meshInfo staggering t = case t of
   Discrete.FieldRef _ _ -> error $ "FieldRef not expected in field initialisation expression " ++ show t
   Discrete.ConstantRef _ _ -> error $ "ConstantRef not expected in field initialisation expression " ++ show t
-  Discrete.Direction i -> index * genericIndex (_meshInfoSpacing meshInfo) i
+  Discrete.Direction i -> index' * genericIndex (_meshInfoSpacing meshInfo) i
     where
     index = Symbol . DSLGridIndex $ fromIntegral i
+    margin = fromIntegral . fst $ genericIndex (_meshInfoMargins meshInfo) i
+    offset = if genericIndex staggering i
+      then 0.5
+      else 0.0
+    index' = index - margin + offset
 
 buildDSLExprInteger :: (Ord e, Show e) => (e -> Expression DSLExpr) -> Expression e -> DSLExpr
 buildDSLExprInteger translateSymbol = buildDSLExpr' . expandSymbols translateSymbol
