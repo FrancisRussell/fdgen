@@ -5,7 +5,7 @@ import System.Exit (exitFailure)
 import FDGEN.Parser (parseInput)
 import FDGEN.Discrete (buildDiscreteForm)
 import FDGEN.Pretty (prettyPrint)
-import FDGEN.Backend(Backend(..))
+import FDGEN.Backend(Backend(..), Options(..), defaultOptions)
 import FDGEN.CppBackend (CppBackend(..))
 import FDGEN.FPGADSLBackend (FPGADSLBackend(..))
 
@@ -24,7 +24,8 @@ processFile filename = do
       Left err -> hPutStrLn stderr (show err) >> exitFailure
       Right spec -> (putStrLn $ prettyPrint spec) >>
                     (putStrLn $ prettyPrint discreteForm) >>
-                    processDiscretised CppBackend discreteForm >>
-                    processDiscretised FPGADSLBackend discreteForm
+                    processDiscretised CppBackend options discreteForm >>
+                    processDiscretised FPGADSLBackend options discreteForm
                     where
                     discreteForm = buildDiscreteForm spec
+                    options = defaultOptions { _optionsInputPath = filename }

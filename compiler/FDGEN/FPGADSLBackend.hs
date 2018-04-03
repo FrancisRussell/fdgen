@@ -1,7 +1,8 @@
 module FDGEN.FPGADSLBackend (FPGADSLBackend(..)) where
-import FDGEN.Backend(Backend(..))
+import FDGEN.Backend(Backend(..), Options(..))
 import System.IO (hPutStrLn, stderr)
 import System.Exit (exitFailure)
+import System.FilePath ((-<.>))
 import FDGEN.Discrete ( Discretised(..), Mesh(..), Field(..), Solve(..)
                       , FieldLValue(..), BoundaryCondition(..), findFieldUpdate
                       , numPreviousTimestepsNeeded, DiscreteTerminal(..)
@@ -483,11 +484,13 @@ buildBCDirectiveDictionary bcDirective = Map.fromList $
 
 instance Backend FPGADSLBackend
   where
-  processDiscretised _ discreteForm = do
+  processDiscretised _ options discreteForm = do
     template <- readFile "./templates/jamie_dsl.template"
     case Template.populate (buildDictionary context) template of
       Left err -> hPutStrLn stderr (show err) >> exitFailure
-      Right generated -> putStrLn generated
+      Right generated -> writeFile outputFile generated
     where
     discreteForm' = constantFoldDiscretised discreteForm
     context = generateContext discreteForm'
+    outputFile = (_optionsInputPath options) -<.> "hs"
+

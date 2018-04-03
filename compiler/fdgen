@@ -1,5 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
+FILE=$(readlink -e $1)
+cd $(dirname $0)
 stack build
-stack exec fdgen "$@"
+stack exec fdgen "${FILE}"

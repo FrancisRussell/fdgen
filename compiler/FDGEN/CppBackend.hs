@@ -9,7 +9,7 @@ data CppBackend = CppBackend
 
 instance Backend CppBackend
   where
-  processDiscretised _ discreteForm = do
+  processDiscretised _ _ discreteForm = do
     template <- readFile "./templates/mesh.hpp.template"
     case Template.populate (buildTemplateDictionary discreteForm) template of
       Left err -> hPutStrLn stderr (show err) >> exitFailure
