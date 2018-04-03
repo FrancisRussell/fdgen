@@ -5,7 +5,7 @@ module FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc
 import Control.Applicative ((<$>))
 import Text.PrettyPrint ( Doc, renderStyle, Style(..), Mode(..), text
                         , double, float, integer, ($+$), nest, empty
-                        , hsep, (<>), punctuate, hcat)
+                        , hsep, (<>), punctuate, hcat, int)
 
 class PrettyPrintable a where
   toDoc :: a -> Doc
@@ -26,6 +26,9 @@ instance PrettyPrintable Float where
 
 instance PrettyPrintable Integer where
   toDoc = integer
+
+instance PrettyPrintable Int where
+  toDoc = int
 
 instance PrettyPrintable Bool where
   toDoc = text . show
