@@ -1,0 +1,3 @@
+[submodule "second-level"]
+	path = second-level
+	url = git@github.com:jme19t/climate_dsl.git

@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 
-./compiler/fdgen $1
+./top-level/fdgen $1
