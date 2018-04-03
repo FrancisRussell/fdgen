@@ -4,7 +4,8 @@ module FDGEN.Discrete (buildDiscreteForm, buildTemplateDictionary
                       , scalarizeTensorFields, constantFoldDiscretised
                       , maxTimestepOrder, getTimestepping, TemporalTerminal(..)
                       , BoundaryCondition(..), EdgeDomain(..), solveGetGhostSizes
-                      , meshGetField, BoundaryConditionType(..)) where
+                      , meshGetField, BoundaryConditionType(..), Terminal(..)
+                      , meshGetInitialValue) where
 import FDGEN.Algebra (Expression(..), diff, adamsBashforthGeneral, expandSymbols, substSymbols, rewriteFixedPoint, vars)
 import FDGEN.Tensor (Tensor, TensorIndex)
 import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, vListDoc)
@@ -134,7 +135,6 @@ data Mesh = Mesh
   , _meshGridSpacing :: [Expression DiscreteTerminal]
   , _meshDimensions :: [Expression DiscreteTerminal]
   , _meshInitialValues :: [(String, Tensor (Expression Terminal))]
-  , _meshInitialValuesDiscrete :: [(String, Tensor (Expression DiscreteTerminal))]
   } deriving Show
 
 instance PrettyPrintable Mesh
@@ -147,7 +147,6 @@ instance PrettyPrintable Mesh
     , ("grid_spacing", hListDoc $ _meshGridSpacing mesh)
     , ("dimensions", hListDoc $ _meshDimensions mesh)
     , ("initial", structureDoc "Map" $ (\(a,b) -> (a, toDoc b)) <$> _meshInitialValues mesh)
-    , ("initial_discrete", structureDoc "Map" $ (\(a,b) -> (a, toDoc b)) <$> _meshInitialValuesDiscrete mesh)
     ]
 
 data Field = Field
@@ -321,7 +320,6 @@ doSpatialDiscretisation = updateMesh
   where
   updateMesh mesh = mesh
     { _meshSolves = updateSolve mesh <$> _meshSolves mesh
-    , _meshInitialValuesDiscrete = discretiseInitial <$> _meshInitialValues mesh
     }
   updateSolve mesh solve = solve
     { _solveUpdates = updateUpdate mesh solve <$> _solveUpdates solve
@@ -329,7 +327,6 @@ doSpatialDiscretisation = updateMesh
     }
   updateUpdate mesh solve update = update { _updateRHSDiscrete = buildRHSDiscrete mesh solve update }
   updateBoundaryCondition _mesh _solve bc = bc { _bcRHSDiscrete = discretiseMeshConstantExpr <$> _bcRHS bc }
-  discretiseInitial (name, expr) = (name, discretiseFieldIndependentExpr <$> expr)
 
 constantFoldDiscretised :: Discretised -> Discretised
 constantFoldDiscretised d = d
@@ -339,8 +336,8 @@ constantFoldDiscretised d = d
   updateMesh mesh = mesh
     { _meshSolves = updateSolve mesh <$> _meshSolves mesh
     , _meshDimensions = substDiscreteTerminals <$> _meshDimensions mesh
+    , _meshGridSpacing = substDiscreteTerminals <$> _meshGridSpacing mesh
     , _meshInitialValues  = (\(a, b) -> (a, substTerminals <$> b)) <$> _meshInitialValues mesh
-    , _meshInitialValuesDiscrete = (\(a, b) -> (a, substDiscreteTerminals <$> b)) <$> _meshInitialValuesDiscrete mesh
     }
   updateSolve mesh solve = solve
     { _solveUpdates = updateUpdate mesh solve <$> _solveUpdates solve
@@ -467,7 +464,6 @@ buildMesh _ fdfl parserMesh = mesh
     , _meshGridSpacing = buildPerMeshDimensionScalar $ Parser._meshGridSpacing parserMesh
     , _meshDimensions = buildPerMeshDimensionScalar $ Parser._meshGridDimensions parserMesh
     , _meshInitialValues = error "buildMesh: initial fields not yet populated"
-    , _meshInitialValuesDiscrete = error "buildMesh: spatial discretisation not yet applied"
     }
   meshFields = (buildField meshNoFields fdfl . Parser.getFieldDef fdfl) <$> (Parser._meshFields parserMesh)
   meshNoInitials = meshNoFields
@@ -533,17 +529,17 @@ meshGetField mesh name = case filter (\f -> _fieldName f == name) (_meshFields m
   [f] -> f
   _ -> error $ "Multiple definitions of " ++ name
 
+meshGetInitialValue :: Mesh -> String -> Maybe (Tensor (Expression Terminal))
+meshGetInitialValue mesh fieldName =
+  case filter (\(name, _) -> fieldName == name) (_meshInitialValues mesh) of
+    [] -> Nothing
+    ((_, expr):_) -> Just expr
+
 discretiseMeshConstantExpr :: Expression Terminal -> Expression DiscreteTerminal
 discretiseMeshConstantExpr = substSymbols makeDiscreteConstant
   where
   makeDiscreteConstant (ConstantRef name idx) = ConstantDataRef name idx
   makeDiscreteConstant sym = error $ "Unable to convert symbol " ++ show sym ++ " to mesh cell-independent value"
-
-discretiseFieldIndependentExpr :: Expression Terminal -> Expression DiscreteTerminal
-discretiseFieldIndependentExpr = substSymbols makeDiscreteConstant
-  where
-  makeDiscreteConstant (ConstantRef name idx) = ConstantDataRef name idx
-  makeDiscreteConstant sym = error $ "Unable to convert symbol " ++ show sym ++ " to field-independent value"
 
 buildBoundaryCondition :: Mesh -> Parser.FDFL -> Parser.Solve -> Parser.BoundaryCondition -> BoundaryCondition
 buildBoundaryCondition mesh fdfl _solve bc = BoundaryCondition

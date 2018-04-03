@@ -16,8 +16,12 @@ model = do
 ${for field in fields}
   addUpdate "${field.name}" $$ ${field.update}
 
-${ifpresent initial is field.initial}
+${ifpresent initial is field.initial_update}
   addInitialUpdate "${field.name}" ${initial.count} $$ ${initial.expression}
+
+${end}
+${ifpresent initial is field.initial_value}
+  setInitialValue "${field.name}" ${initial}
 
 ${end}
 ${end}

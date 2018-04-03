@@ -7,7 +7,8 @@ import FDGEN.Discrete ( Discretised(..), Mesh(..), Field(..), Solve(..)
                       , numPreviousTimestepsNeeded, DiscreteTerminal(..)
                       , Update(..), constantFoldDiscretised, maxTimestepOrder
                       , getTimestepping, TemporalTerminal(..), solveGetGhostSizes
-                      , meshGetField, BoundaryConditionType(..))
+                      , meshGetField, BoundaryConditionType(..)
+                      , meshGetInitialValue)
 import FDGEN.Algebra (Expression(..), PairSeq(..), expandSymbols)
 import Control.Applicative ((<$>))
 import Data.Ratio (numerator, denominator)
@@ -17,7 +18,7 @@ import FDGEN.Precedence ( PDoc(..), renderInfix, renderTerminal
 import FDGEN.Pretty (PrettyPrintable(..))
 import FDGEN.Util (mergeBoundingRange)
 import Data.Map (Map)
-import Data.List (genericReplicate)
+import Data.List (genericReplicate, genericIndex)
 import qualified FDGEN.Template as Template
 import qualified FDGEN.Tensor as Tensor
 import qualified FDGEN.Discrete as Discrete
@@ -35,7 +36,8 @@ data Context = Context
 data CellVariable = CellVariable
   { _cellVariableName :: String
   , _cellVariableExpr :: DSLExpr
-  , _cellVariableInitialExpr :: Maybe (Integer, DSLExpr)
+  , _cellVariableInitialUpdate :: Maybe (Integer, DSLExpr)
+  , _cellVariableInitialExpr :: Maybe DSLExpr
   } deriving Show
 
 data BCDirective = BCDirective
@@ -66,7 +68,8 @@ data Axis
 
 data MeshInfo = MeshInfo
   { _meshInfoMargins :: [(Integer, Integer)]
-  , _meshInfoDimensions :: [DSLExpr]
+  , _meshInfoDimensions :: [Expression DSLExpr]
+  , _meshInfoSpacing :: [Expression DSLExpr]
   } deriving Show
 
 data ValueSource
@@ -160,6 +163,8 @@ instance PDocPrintable DSLExpr where
       DSLCurrent e -> renderApplication "Current" [renderDSLExpr' e]
       DSLCos e -> renderApplication "cos" [renderDSLExpr' e]
       DSLSin e -> renderApplication "sin" [renderDSLExpr' e]
+      DSLGridIndex i -> renderApplication "Index" [renderNum i]
+      DSLPow a b -> renderApplication "Power" [renderDSLExpr' a, renderDSLExpr' b]
     renderNum :: (Show a, Eq a, Num a) => a -> PDoc
     renderNum n = if signum n == fromInteger (-1)
       then renderPrefix ("-", PrecLevel 6) (renderTerminal . show $ abs n)
@@ -180,6 +185,8 @@ data DSLExpr
   | DSLCurrent DSLExpr
   | DSLCos DSLExpr
   | DSLSin DSLExpr
+  | DSLPow DSLExpr DSLExpr
+  | DSLGridIndex Int
   deriving (Eq, Ord, Show)
 
 instance Num DSLExpr where
@@ -206,13 +213,14 @@ generateContext :: Discretised -> Context
 generateContext discretised = context
   where
   context = Context
-    { _contextCellVariables = buildCellVariables discretised mesh solve
+    { _contextCellVariables = buildCellVariables meshInfo discretised mesh solve
     , _contextBCDirectives = buildBCDirectives discretised mesh solve
     , _contextMeshDimensions = oversizedDimensionsDSL
     }
   meshInfo = MeshInfo
     { _meshInfoMargins = margins
-    , _meshInfoDimensions = meshDimensionsDSL
+    , _meshInfoDimensions = expandSymbols expandDiscreteTerminal <$> meshDimensions
+    , _meshInfoSpacing = expandSymbols expandDiscreteTerminal <$> (_meshGridSpacing mesh)
     }
   meshDimensionsDSL = buildDSLExprInteger expandDiscreteTerminal <$> meshDimensions
   ghostSizes = mergeGhostSizes meshDimension $ solveGetGhostSizes solve
@@ -223,9 +231,9 @@ generateContext discretised = context
   meshDimensions = _meshDimensions mesh
   meshDimension = _meshDimension mesh
 
-buildCellVariables :: Discretised -> Mesh -> Solve -> [CellVariable]
-buildCellVariables discretised mesh solve =
-  concatMap (fieldToCellVariables discretised mesh solve) (_meshFields mesh)
+buildCellVariables :: MeshInfo -> Discretised -> Mesh -> Solve -> [CellVariable]
+buildCellVariables meshInfo discretised mesh solve =
+  concatMap (fieldToCellVariables meshInfo discretised mesh solve) (_meshFields mesh)
 
 buildBCDirectives :: Discretised -> Mesh -> Solve -> [BCDirective]
 buildBCDirectives discretised mesh solve =
@@ -307,8 +315,8 @@ generateTimestepping solve update name order = buildDSLExpr translateTerminal ex
     DeltaT -> expandSymbols expandDiscreteTerminal $ _solveDeltaT solve
     PreviousDerivative i -> Symbol $ getPreviousDerivative name i
 
-fieldToCellVariables :: Discretised -> Mesh -> Solve -> Field -> [CellVariable]
-fieldToCellVariables _discretised _mesh solve field = (cellVariable:cellVariableDerivatives)
+fieldToCellVariables :: MeshInfo -> Discretised -> Mesh -> Solve -> Field -> [CellVariable]
+fieldToCellVariables meshInfo _discretised mesh solve field = (cellVariable:cellVariableDerivatives)
   where
   update = findFieldUpdate (FieldLValue (_fieldName field) []) solve
   rhsTensor = _updateRHSDiscrete update
@@ -323,17 +331,23 @@ fieldToCellVariables _discretised _mesh solve field = (cellVariable:cellVariable
   cellVariable = CellVariable
     { _cellVariableName = name
     , _cellVariableExpr = generateTimestepping solve update name maxTemporalOrder
-    , _cellVariableInitialExpr = if numDerivativesNeeded == 0
+    , _cellVariableInitialUpdate = if numDerivativesNeeded == 0
       then Nothing
       else Just (numDerivativesNeeded, generateTimestepping solve update name 1)
+    , _cellVariableInitialExpr = getInitialExpr
     }
   cellVariableDerivative n = CellVariable
     { _cellVariableName = getDerivativeName name n
     , _cellVariableExpr = if n == 0
       then buildDSLExpr expandDiscreteTerminal rhs
       else getPreviousDerivative name n
+    , _cellVariableInitialUpdate = Nothing
     , _cellVariableInitialExpr = Nothing
     }
+  getInitialExpr = initialDSLExpr
+    where
+    initial = Tensor.asScalar <$> meshGetInitialValue mesh name
+    initialDSLExpr = buildDSLExpr (expandTerminal meshInfo) <$> initial
 
 expandDiscreteTerminal :: DiscreteTerminal -> Expression DSLExpr
 expandDiscreteTerminal s = Symbol $ case s of
@@ -343,6 +357,14 @@ expandDiscreteTerminal s = Symbol $ case s of
       _ -> error $ "Expected 2D stencil offset expression: " ++ show s
     ConstantDataRef _ _ -> error $ "No non-literal constants expected in FPGA backend (was constant folding applied?): " ++ show s
     FieldDataRef _ _ _  -> error $ "Expected no indices for field index expression (were tensor fields scalarized?): " ++ show s
+
+expandTerminal :: MeshInfo -> Discrete.Terminal -> Expression DSLExpr
+expandTerminal meshInfo t = case t of
+  Discrete.FieldRef _ _ -> error $ "FieldRef not expected in field initialisation expression " ++ show t
+  Discrete.ConstantRef _ _ -> error $ "ConstantRef not expected in field initialisation expression " ++ show t
+  Discrete.Direction i -> index * genericIndex (_meshInfoSpacing meshInfo) i
+    where
+    index = Symbol . DSLGridIndex $ fromIntegral i
 
 buildDSLExprInteger :: (Ord e, Show e) => (e -> Expression DSLExpr) -> Expression e -> DSLExpr
 buildDSLExprInteger translateSymbol = buildDSLExpr' . expandSymbols translateSymbol
@@ -385,6 +407,7 @@ buildDSLExpr translateSymbol = buildDSLExpr' . expandSymbols translateSymbol
     ConstantRational r -> DSLDouble $ fromRational r
     Pi -> DSLDouble pi
     Euler -> DSLDouble $ exp 1
+    Power a b -> DSLPow (buildDSLExpr' a) (buildDSLExpr' b)
     Abs _ -> error $ "unhandled expression: " ++ show e
     Signum _ -> error $ "unhandled expression: " ++ show e
     Ln _ -> error $ "unhandled expression: " ++ show e
@@ -423,17 +446,20 @@ buildCellVariableDictionary :: CellVariable -> Template.Dict
 buildCellVariableDictionary cellVariable = Map.fromList $
   [ ("name", Template.StringVal name)
   , ("update", Template.StringVal . renderDSLExpr $ _cellVariableExpr cellVariable)
-  ] ++ initial
+  ] ++ initialUpdate ++ initialValue
   where
   name = _cellVariableName cellVariable
-  initial = case _cellVariableInitialExpr cellVariable of
+  initialUpdate = case _cellVariableInitialUpdate cellVariable of
     Nothing -> []
-    Just (count, expr) -> [("initial", initialMap)]
+    Just (count, expr) -> [("initial_update", initialMap)]
       where
       initialMap = Template.DictVal $ Map.fromList
         [ ("count", Template.StringVal $ show count)
         , ("expression", Template.StringVal $ renderDSLExpr expr)
         ]
+  initialValue = case _cellVariableInitialExpr cellVariable of
+    Nothing -> []
+    Just expr -> [("initial_value", Template.StringVal $ renderDSLExpr expr)]
 
 buildBCDirectiveDictionary :: BCDirective -> Template.Dict
 buildBCDirectiveDictionary bcDirective = Map.fromList $

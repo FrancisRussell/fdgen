@@ -383,7 +383,7 @@ parseMesh = ObjectParseSpec "Mesh" []
   , buildAttributeSpec "solves" True (validateList isSolve >=> noDuplicates) meshSolves
   , buildAttributeSpec "spacing" True alwaysValid meshGridSpacing
   , buildAttributeSpec "dimensions" True alwaysValid meshGridDimensions
-  , buildAttributeSpec "initial" True alwaysValid meshInitialValues
+  , buildAttributeSpec "initial" False alwaysValid meshInitialValues
   ]
 
 parseEquation :: ObjectParseSpec Equation
