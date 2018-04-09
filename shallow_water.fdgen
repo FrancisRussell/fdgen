@@ -9,12 +9,11 @@ nx = NamedLiteral(name="nx", value=50)
 
 VelocityEq = Equation(Dt(u), nu * div(grad(u)) - dot(u, grad(u)) - g * grad(h))
 HeightEq = Equation(Dt(h), -div((h + H) * u))
-VelocityBC_H = BoundaryCondition(u[0], 0, subdomains=["top_edge", "bottom_edge"])
-VelocityBC_V = BoundaryCondition(u[1], 0, subdomains=["left_edge", "right_edge"])
+VelocityBC = BoundaryCondition(u, [0, 0])
 HeightBC = BoundaryCondition(Dn(h), 0)
 
 TimeStep = Solve(name="step", spatial_order=1, temporal_order=3, equations=[VelocityEq, HeightEq], 
-  boundary_conditions=[VelocityBC_H, VelocityBC_V, HeightBC], delta_t=dt)
+  boundary_conditions=[VelocityBC, HeightBC], delta_t=dt)
 
 sigmax = pow(pos[0] - (nx * hx) / 2.0, 2) / pow(3.0 * nx * hx / 20.0, 2)
 sigmay = pow(pos[1] - (nx * hx) / 2.0, 2) / pow(3.0 * nx * hx / 20.0, 2)
