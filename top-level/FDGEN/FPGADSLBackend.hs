@@ -43,7 +43,7 @@ data CellVariable = CellVariable
 
 data BCDirective = BCDirective
   { _bcDirectiveVariable :: String
-  , _bcDirectiveAxis :: Axis
+  , _bcDirectivePlane :: Plane
   , _bcDirectiveOffset :: DSLExpr
   , _bcDirectiveLow :: DSLExpr
   , _bcDirectiveHigh :: DSLExpr
@@ -66,6 +66,8 @@ data Axis
   = Vertical
   | Horizontal
   deriving (Eq, Ord, Show)
+
+type Plane = Axis
 
 data MeshInfo = MeshInfo
   { _meshInfoMargins :: [(Integer, Integer)]
@@ -103,12 +105,19 @@ instance PDocPrintable ValueSource where
         where
           zeroAtom = PDoc (toDoc name) NoAssoc AtomPrec
 
-getEdgeDomainAxis :: EdgeDomain -> Axis
-getEdgeDomainAxis d = case d of
+getEdgeDomainPlane :: EdgeDomain -> Plane
+getEdgeDomainPlane d = case d of
   LeftEdge -> Vertical
   RightEdge -> Vertical
   TopEdge -> Horizontal
   BottomEdge -> Horizontal
+
+getEdgeDomainNormal :: EdgeDomain -> Axis
+getEdgeDomainNormal d = case d of
+  LeftEdge -> Horizontal
+  RightEdge -> Horizontal
+  TopEdge -> Vertical
+  BottomEdge -> Vertical
 
 axisDimension :: Axis -> Int
 axisDimension Horizontal = 0
@@ -246,20 +255,21 @@ bcToDirectives _discretised mesh solve bc = buildDirective <$> edge_domains
   edge_domains = concatMapUniq translateEdgeDomain (_bcSubdomains bc)
   buildDirective edge_domain = BCDirective
     { _bcDirectiveVariable = fieldName
-    , _bcDirectiveAxis = getEdgeDomainAxis edge_domain
+    , _bcDirectivePlane = getEdgeDomainPlane edge_domain
     , _bcDirectiveOffset = edgeOffset
     , _bcDirectiveLow = fst planeLimits
     , _bcDirectiveHigh = snd planeLimits
     , _bcDirectiveAction = action
     }
     where
-      bcAxis = getEdgeDomainAxis edge_domain
-      bcDimension = axisDimension bcAxis
+      bcNormal = getEdgeDomainNormal edge_domain
+      bcNormalDimension = axisDimension bcNormal
+      bcPlaneDimension = axisDimension $ getEdgeDomainPlane edge_domain
       bcValue = Tensor.asScalar $ _bcRHSDiscrete bc
       bcValueDSL = buildDSLExpr expandDiscreteTerminal bcValue
       bcValueDoubledDSL = buildDSLExpr expandDiscreteTerminal $ bcValue * 2
       bcValueScaledDSL = buildDSLExpr expandDiscreteTerminal $ bcValue * spacing
-      spacing = (_meshGridSpacing mesh) !! bcDimension
+      spacing = (_meshGridSpacing mesh) !! bcNormalDimension
       fieldLValue = _bcField bc
       fieldName = getScalarFieldName fieldLValue
       bcType = _bcType bc
@@ -269,19 +279,16 @@ bcToDirectives _discretised mesh solve bc = buildDirective <$> edge_domains
       ghostSizes = mergeGhostSizes meshDimension $ solveGetGhostSizes solve
       margins = (\(a,b) -> (abs a, abs b)) <$> ghostSizes
       field = meshGetField mesh fieldName
-      fieldStaggered = (getSingleton "stagger" $ _fieldStaggerSpatial field) !! bcDimension
+      fieldStaggeredNormal = (getSingleton "stagger" $ _fieldStaggerSpatial field) !! bcNormalDimension
       sign = normalSign edge_domain
-      edgeOffset = makeIntegerExpr $ case (bcType, fieldStaggered, sign) of
+      edgeOffset = makeIntegerExpr $ case (bcType, fieldStaggeredNormal, sign) of
         (Dirichlet, False, Negative) -> left
         (_, _, Negative) -> left - 1
         (_, _, Positive) -> right
         where
-          perpDimension = case bcAxis of
-            Horizontal -> 1
-            Vertical -> 0
-          left = fromIntegral . fst $ margins !! perpDimension
-          right = left + meshDimensions !! perpDimension
-      action = case (bcType, fieldStaggered, sign) of
+          left = fromIntegral . fst $ margins !! bcNormalDimension
+          right = left + meshDimensions !! bcNormalDimension
+      action = case (bcType, fieldStaggeredNormal, sign) of
         (Dirichlet, False, _) -> SetValue bcValueDSL
         (Dirichlet, True, Negative) -> NegateValueAwayFromZero bcValueDoubledDSL
         (Dirichlet, True, Positive) -> NegateValueTowardsZero bcValueDoubledDSL
@@ -289,8 +296,8 @@ bcToDirectives _discretised mesh solve bc = buildDirective <$> edge_domains
         (Neumann, _, Positive) -> CopyValueTowardsZero bcValueScaledDSL
       planeLimits = (makeIntegerExpr $ fromIntegral marginLow, makeIntegerExpr $ meshWidth + fromIntegral marginLow)
         where
-          (marginLow, _marginHigh) = margins !! bcDimension
-          meshWidth = meshDimensions !! bcDimension
+          (marginLow, _marginHigh) = margins !! bcPlaneDimension
+          meshWidth = meshDimensions !! bcPlaneDimension
 
 getScalarFieldName :: FieldLValue -> String
 getScalarFieldName lvalue = case lvalue of
@@ -471,7 +478,7 @@ buildCellVariableDictionary cellVariable = Map.fromList $
 buildBCDirectiveDictionary :: BCDirective -> Template.Dict
 buildBCDirectiveDictionary bcDirective = Map.fromList $
   [ ("variable", Template.StringVal name)
-  , ("axis", Template.StringVal . show $ _bcDirectiveAxis bcDirective)
+  , ("plane", Template.StringVal . show $ _bcDirectivePlane bcDirective)
   , ("offset", makeVal $ _bcDirectiveOffset bcDirective)
   , ("low", makeVal $ _bcDirectiveLow bcDirective)
   , ("high", makeVal $ _bcDirectiveHigh bcDirective)

@@ -26,6 +26,6 @@ ${ifpresent initial is field.initial_value}
 ${end}
 ${end}
 ${for bc in boundary_conditions}
-  setBoundryCondition "${bc.variable}" ${bc.axis} ${bc.offset} ${bc.low} ${bc.high} ${bc.action}
+  setBoundryCondition "${bc.variable}" ${bc.plane} ${bc.offset} ${bc.low} ${bc.high} ${bc.action}
 
 ${end}
