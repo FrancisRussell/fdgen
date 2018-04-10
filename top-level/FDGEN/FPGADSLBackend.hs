@@ -167,7 +167,7 @@ instance PDocPrintable DSLExpr where
       DSLIntPower e i -> renderApplication "IntPower" [renderDSLExpr' e, renderNum i]
       DSLCellVariable name -> renderTerminal name
       DSLConstant name e -> renderApplication "Constant" [renderTerminal name, renderDSLExpr' e]
-      DSLInt i -> renderApplication "EInt" [renderNum i]
+      DSLInt i -> renderNum i
       DSLDouble d -> renderNum d
       DSLOffset e x y -> renderApplication "Offset" [renderDSLExpr' e, renderNum x, renderNum y]
       DSLCurrent e -> renderApplication "Current" [renderDSLExpr' e]
