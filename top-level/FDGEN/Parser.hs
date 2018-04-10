@@ -371,14 +371,14 @@ parseField = ObjectParseSpec "Field" []
   [ buildAttributeSpec "rank" True alwaysValid fieldRank
   , buildAttributeSpec "name" True alwaysValid fieldName
   , buildAttributeSpec "symmetric" False alwaysValid fieldSymmetric
-  , buildAttributeSpec "spatial_stagger_strategy" False alwaysValid fieldStaggerStrategySpatial
-  , buildAttributeSpec "temporal_stagger_strategy" False alwaysValid fieldStaggerStrategyTemporal
+  , buildAttributeSpec "spatial_staggering" False alwaysValid fieldStaggerStrategySpatial
+  , buildAttributeSpec "temporal_staggering" False alwaysValid fieldStaggerStrategyTemporal
   ]
 
 parseMesh :: ObjectParseSpec Mesh
 parseMesh = ObjectParseSpec "Mesh" []
   [ buildAttributeSpec "name" True alwaysValid meshName
-  , buildAttributeSpec "dimension" True alwaysValid meshDimension
+  , buildAttributeSpec "dim" True alwaysValid meshDimension
   , buildAttributeSpec "fields" True (validateList isFieldLike >=> noDuplicates) meshFields
   , buildAttributeSpec "solves" True (validateList isSolve >=> noDuplicates) meshSolves
   , buildAttributeSpec "spacing" True alwaysValid meshGridSpacing

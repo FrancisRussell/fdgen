@@ -1,22 +1,22 @@
-u = Field(name="velocity", rank=1, spatial_stagger_strategy="dimension")
-h = Field(name="height", rank=0, spatial_stagger_strategy="none")
+u = Field(name="velocity", rank=1, spatial_staggering="dimension")
+h = Field(name="height", rank=0)
 dt = NamedLiteral(name="dt", value=10.0)
-nu = NamedLiteral(name="nu", value=0.0)
+nu = NamedLiteral(name="nu", value=470.23)
 g = NamedLiteral(name="g", value=9.81)
 H = NamedLiteral(name="h0", value=5000.0)
 hx = NamedLiteral(name="hx", value=50000.0)
 nx = NamedLiteral(name="nx", value=50)
 
-VelocityEq = Equation(Dt(u), nu * div(grad(u)) - dot(u, grad(u)) - g * grad(h))
-HeightEq = Equation(Dt(h), -div((h + H) * u))
-VelocityBC = BoundaryCondition(u, [0, 0])
-HeightBC = BoundaryCondition(Dn(h), 0)
+V_Eq = Equation(Dt(u), nu * div(grad(u)) - dot(u, grad(u)) - g * grad(h))
+H_Eq = Equation(Dt(h), -div((h + H) * u))
+V_BC = BoundaryCondition(u, [0, 0])
+H_BC = BoundaryCondition(Dn(h), 0)
 
-TimeStep = Solve(name="step", spatial_order=1, temporal_order=3, equations=[VelocityEq, HeightEq], 
-  boundary_conditions=[VelocityBC, HeightBC], delta_t=dt)
+TimeStep = Solve(name="step", spatial_order=1, temporal_order=3, equations=[V_Eq, H_Eq], 
+  boundary_conditions=[V_BC, H_BC], delta_t=dt)
 
 sigmax = pow(pos[0] - (nx * hx) / 2.0, 2) / pow(3.0 * nx * hx / 20.0, 2)
 sigmay = pow(pos[1] - (nx * hx) / 2.0, 2) / pow(3.0 * nx * hx / 20.0, 2)
 
-m = Mesh(name="shallow_water", dimension=2, fields=[u, h], solves=[TimeStep], spacing=[hx, hx], 
+m = Mesh(name="shallow_water", dim=2, fields=[u, h], solves=[TimeStep], spacing=[hx, hx], 
   dimensions=[nx, nx], initial=[("height", 100 * exp(-sigmax - sigmay))])

@@ -135,10 +135,10 @@ allExteriorEdgeDomains = [LeftEdge, RightEdge, TopEdge, BottomEdge]
 
 tagToEdgeDomains :: String -> [EdgeDomain]
 tagToEdgeDomains tag = case tag of
-  "left_edge" -> [LeftEdge]
-  "right_edge" -> [RightEdge]
-  "top_edge" -> [TopEdge]
-  "bottom_edge" -> [BottomEdge]
+  "left" -> [LeftEdge]
+  "right" -> [RightEdge]
+  "top" -> [TopEdge]
+  "bottom" -> [BottomEdge]
   _ -> error $ "Unrecognised tag for edge domain " ++ show tag
 
 translateEdgeDomain :: Discrete.EdgeDomain -> [EdgeDomain]
