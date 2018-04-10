@@ -1,7 +1,7 @@
 u = Field(name="u", rank=1, spatial_staggering="dimension")
 h = Field(name="h", rank=0)
 dt = NamedLiteral(name="dt", value=10.0)
-nu = NamedLiteral(name="nu", value=470.23)
+nu = NamedLiteral(name="nu", value=0.0)
 g = NamedLiteral(name="g", value=9.81)
 H = NamedLiteral(name="h0", value=5000.0)
 hx = NamedLiteral(name="hx", value=50000.0)
