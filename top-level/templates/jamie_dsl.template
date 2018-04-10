@@ -9,15 +9,15 @@ ${field.name} = CellVariable "${field.name}"
 ${end}
 
 model = do
-  setWidth $$ ${width}
+  setWidth ${width}
 
-  setHeight $$ ${height}
+  setHeight ${height}
 
 ${for field in fields}
-  addUpdate "${field.name}" $$ ${field.update}
+  addUpdate "${field.name}" ${field.update}
 
 ${ifpresent initial is field.initial_update}
-  addInitialUpdate "${field.name}" ${initial.count} $$ ${initial.expression}
+  addInitialUpdate "${field.name}" ${initial.count} ${initial.expression}
 
 ${end}
 ${ifpresent initial is field.initial_value}

@@ -451,15 +451,15 @@ buildDictionary context = template'''
   where
   template = Template.insert "fields" (Template.ListVal $ Template.DictVal <$> fieldDictionaries) Template.emptyDict
   template' = Template.insert "boundary_conditions" (Template.ListVal $ Template.DictVal <$> bcDictionaries) template
-  template'' = Template.insert "width" (Template.StringVal $ renderDSLExpr $ (_contextMeshDimensions context !! 0)) template'
-  template''' = Template.insert "height" (Template.StringVal $ renderDSLExpr $ (_contextMeshDimensions context !! 1)) template''
+  template'' = Template.insert "width" (makeAtomicVal (_contextMeshDimensions context !! 0)) template'
+  template''' = Template.insert "height" (makeAtomicVal (_contextMeshDimensions context !! 1)) template''
   fieldDictionaries = buildCellVariableDictionary <$> _contextCellVariables context
   bcDictionaries = buildBCDirectiveDictionary <$> _contextBCDirectives context
 
 buildCellVariableDictionary :: CellVariable -> Template.Dict
 buildCellVariableDictionary cellVariable = Map.fromList $
   [ ("name", Template.StringVal name)
-  , ("update", Template.StringVal . renderDSLExpr $ _cellVariableExpr cellVariable)
+  , ("update", makeAtomicVal $ _cellVariableExpr cellVariable)
   ] ++ initialUpdate ++ initialValue
   where
   name = _cellVariableName cellVariable
@@ -469,25 +469,27 @@ buildCellVariableDictionary cellVariable = Map.fromList $
       where
       initialMap = Template.DictVal $ Map.fromList
         [ ("count", Template.StringVal $ show count)
-        , ("expression", Template.StringVal $ renderDSLExpr expr)
+        , ("expression", makeAtomicVal expr)
         ]
   initialValue = case _cellVariableInitialExpr cellVariable of
     Nothing -> []
-    Just expr -> [("initial_value", Template.StringVal $ renderDSLExpr expr)]
+    Just expr -> [("initial_value", makeAtomicVal expr)]
+
+
+makeAtomicVal :: PDocPrintable a => a -> Template.Val
+makeAtomicVal = Template.StringVal . renderDSLExpr . makeAtomic . pDocPrint
 
 buildBCDirectiveDictionary :: BCDirective -> Template.Dict
 buildBCDirectiveDictionary bcDirective = Map.fromList $
   [ ("variable", Template.StringVal name)
   , ("plane", Template.StringVal . show $ _bcDirectivePlane bcDirective)
-  , ("offset", makeVal $ _bcDirectiveOffset bcDirective)
-  , ("low", makeVal $ _bcDirectiveLow bcDirective)
-  , ("high", makeVal $ _bcDirectiveHigh bcDirective)
-  , ("action", makeVal $ _bcDirectiveAction bcDirective)
+  , ("offset", makeAtomicVal $ _bcDirectiveOffset bcDirective)
+  , ("low", makeAtomicVal $ _bcDirectiveLow bcDirective)
+  , ("high", makeAtomicVal $ _bcDirectiveHigh bcDirective)
+  , ("action", makeAtomicVal $ _bcDirectiveAction bcDirective)
   ]
   where
   name = _bcDirectiveVariable bcDirective
-  makeVal :: PDocPrintable a => a -> Template.Val
-  makeVal = Template.StringVal . renderDSLExpr . makeAtomic . pDocPrint
 
 instance Backend FPGADSLBackend
   where
