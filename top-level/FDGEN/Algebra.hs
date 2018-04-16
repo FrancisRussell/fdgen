@@ -634,13 +634,15 @@ addPrec = PrecLevel 1
 instance PrettyPrintable e => PrettyPrintable (Expression e) where
   toDoc expr = pDoc $ toPDoc expr
     where
-    renderInteger :: Integer -> PDoc
-    renderInteger i = if i >= 0
+    renderFloat :: Float -> PDoc
+    renderFloat i = if i >= 0
       then PDoc (toDoc i) NoAssoc AtomPrec
       else PDoc (hcat [char '-', toDoc (-i)]) NoAssoc unaryPrec
+    renderInteger :: Integer -> PDoc
+    renderInteger = renderFloat . fromIntegral
     renderRational r = case denominator r of
        1 -> renderInteger $ numerator r
-       _ -> renderDivision (renderInteger $ numerator r) (renderInteger $ denominator r)
+       _ -> renderDivision (renderInteger $  numerator r) (renderInteger $ denominator r)
     renderDivision = renderInfix ("/", mulPrec, LeftAssoc)
     renderMultiplication = renderInfix ("*", mulPrec, LeftAssoc)
     renderAddition = renderInfix ("+", addPrec, LeftAssoc)
