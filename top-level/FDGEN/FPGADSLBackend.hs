@@ -264,7 +264,6 @@ bcToDirectives _discretised mesh solve bc = buildDirective <$> edge_domains
     where
       bcNormal = getEdgeDomainNormal edge_domain
       bcNormalDimension = axisDimension bcNormal
-      bcPlaneDimension = axisDimension $ getEdgeDomainPlane edge_domain
       bcValue = Tensor.asScalar $ _bcRHSDiscrete bc
       bcValueDSL = buildDSLExpr expandDiscreteTerminal bcValue
       bcValueDoubledDSL = buildDSLExpr expandDiscreteTerminal $ bcValue * 2
@@ -296,8 +295,12 @@ bcToDirectives _discretised mesh solve bc = buildDirective <$> edge_domains
         (Neumann, _, Positive) -> CopyValueTowardsZero bcValueScaledDSL
       planeLimits = (makeIntegerExpr $ fromIntegral marginLow, makeIntegerExpr $ meshWidth + fromIntegral marginLow)
         where
-          (marginLow, _marginHigh) = margins !! bcPlaneDimension
-          meshWidth = meshDimensions !! bcPlaneDimension
+          bcPlaneDimension = axisDimension $ getEdgeDomainPlane edge_domain
+          fieldStaggeredPlane = (getSingleton "stagger" $ _fieldStaggerSpatial field) !! bcPlaneDimension
+          fieldStaggeredPlaneInt = if fieldStaggeredPlane then 1 else 0
+          (marginLow', _marginHigh) = margins !! bcPlaneDimension
+          marginLow = marginLow' - fieldStaggeredPlaneInt
+          meshWidth = fromIntegral fieldStaggeredPlaneInt + meshDimensions !! bcPlaneDimension
 
 getScalarFieldName :: FieldLValue -> String
 getScalarFieldName lvalue = case lvalue of
