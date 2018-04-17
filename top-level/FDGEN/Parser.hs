@@ -639,7 +639,7 @@ parseFloatAsRational = makeResult <$> choice
   makeResult (s, i, f, e) = (signToInteger s) * raised
     where
     base = (fromIntegral $ digitsToInteger i) + (digitsToFrac f)
-    raised = base * ((10::Rational) ^ e)
+    raised = base * ((10::Rational) ^^ e)
   parseSign = choice $ char <$> ['+', '-']
   signToInteger sign = case sign of
     '+' -> 1
@@ -673,7 +673,7 @@ parseFloatAsRational = makeResult <$> choice
   digitsToInteger (d:ds) = (fromIntegral $ digitToInt d) * ((10::Integer) ^ (length ds)) + digitsToInteger ds
   digitsToFrac :: [Char] -> Rational
   digitsToFrac [] = 0
-  digitsToFrac ds = (fromIntegral $ digitsToInteger ds) / ((10::Rational) ^ (length ds))
+  digitsToFrac ds = (fromIntegral $ digitsToInteger ds) / ((10::Rational) ^^ (length ds))
 
 instance FDFLParsable Integer where
   parse = parseInteger
