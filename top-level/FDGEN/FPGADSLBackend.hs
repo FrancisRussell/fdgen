@@ -17,7 +17,7 @@ import FDGEN.Precedence ( PDoc(..), renderInfix, renderTerminal
                         , Precedence(..), Assoc(..), renderPrefix
                         , renderPrefixMultiParam, makeAtomic)
 import FDGEN.Pretty (PrettyPrintable(..))
-import FDGEN.Util (mergeBoundingRange)
+import FDGEN.Util (mergeBoundingRange, isTerminating)
 import Data.Map (Map)
 import Data.List (genericReplicate, genericIndex)
 import qualified FDGEN.Template as Template
@@ -421,7 +421,7 @@ buildDSLExpr translateSymbol = buildDSLExpr' . expandSymbols translateSymbol
     Sum seq' -> buildPairSeq (0, (+)) (1, multRational) seq'
     Product seq' -> buildPairSeq (1, (*)) (1, raiseInt) seq'
     ConstantFloat f -> DSLDouble f
-    ConstantRational r -> DSLDouble $ fromRational r
+    ConstantRational r -> buildRational r
     Pi -> DSLDouble pi
     Euler -> DSLDouble $ exp 1
     Power a b -> DSLPow (buildDSLExpr' a) (buildDSLExpr' b)
@@ -448,6 +448,9 @@ buildDSLExpr translateSymbol = buildDSLExpr' . expandSymbols translateSymbol
       transformPair (a, b) = if b /= null2
         then (buildDSLExpr' a) `op2` b
         else (buildDSLExpr' a)
+    buildRational r = if isTerminating r
+      then DSLDouble $ fromRational r
+      else (DSLDouble . fromIntegral $ numerator r) / (DSLDouble . fromIntegral $ denominator r)
 
 buildDictionary :: Context -> Template.Dict
 buildDictionary context = template'''
