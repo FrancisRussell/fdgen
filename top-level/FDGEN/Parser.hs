@@ -1,4 +1,4 @@
-{-# LANGUAGE TemplateHaskell, Rank2Types, FlexibleInstances #-}
+{-# LANGUAGE TemplateHaskell, Rank2Types, FlexibleInstances, FlexibleContexts #-}
 module FDGEN.Parser ( parseInput, FDFL, getSymbols, Definition(..)
                     , Mesh(..), stringLiteralValue, identifierValue
                     , getSymbol, Field(..), Solve(..), Equation(..)
@@ -6,16 +6,16 @@ module FDGEN.Parser ( parseInput, FDFL, getSymbols, Definition(..)
                     , MeshConstant(..), Identifier(..), StaggerStrategy(..)
                     , BoundaryCondition(..), NamedLiteral(..)
                     , StringLiteral) where
-import Data.Char (toLower)
+import Data.Char (toLower, digitToInt)
 import Data.Map (Map)
 import Data.Maybe (isJust)
 import Data.List (genericIndex)
 import Control.Applicative ((<$>))
 import Control.Monad ((>=>))
-import Text.Parsec.Char (letter, spaces)
-import Text.Parsec.Combinator (eof, choice, optionMaybe)
+import Text.Parsec.Char (letter, spaces, char, digit)
+import Text.Parsec.Combinator (eof, choice, optionMaybe, many1, option)
 import Text.Parsec.Language (emptyDef, LanguageDef)
-import Text.Parsec (ParsecT, ParseError, runParser, getState, Parsec, putState, try)
+import Text.Parsec (ParsecT, ParseError, runParser, getState, Parsec, putState, try, Stream)
 import Text.Parsec.Prim (many, parserFail)
 import Text.Parsec.Expr (buildExpressionParser, Operator(..), Assoc(..))
 import Text.Parsec.Token (GenTokenParser(..), GenLanguageDef(..), makeTokenParser)
@@ -624,9 +624,56 @@ instance FDFLParsable Identifier where
 
 instance FDFLParsable Rational where
   parse = choice
-    [ realToFrac <$> try parseFloat
+    [ try $ parseLexeme parseFloatAsRational
     , fromInteger <$> parseInteger
     ]
+
+parseFloatAsRational :: Stream s m Char => ParsecT s u m Rational
+parseFloatAsRational = makeResult <$> choice
+  [ try parseA
+  , try parseB
+  , parseC
+  ]
+  where
+  makeResult :: (Char, String, String, Integer) -> Rational
+  makeResult (s, i, f, e) = (signToInteger s) * raised
+    where
+    base = (fromIntegral $ digitsToInteger i) + (digitsToFrac f)
+    raised = base * ((10::Rational) ^ e)
+  parseSign = choice $ char <$> ['+', '-']
+  signToInteger sign = case sign of
+    '+' -> 1
+    '-' -> (-1)
+    _ -> error $ "signToInteger: unexpected " ++ show sign
+  parseExponent = do
+    _ <- choice $ char <$> ['e', 'E']
+    sign <- option '+' parseSign
+    digits <- many1 digit
+    return $ (signToInteger sign) * (digitsToInteger digits)
+  parseA = do
+    sign <- option '+' parseSign
+    intDigits <- many1 digit
+    _ <- char '.'
+    fracDigits <- many digit
+    exp' <- option 0 parseExponent
+    return (sign, intDigits, fracDigits, exp')
+  parseB = do
+    sign <- option '+' parseSign
+    _ <- char '.'
+    fracDigits <- many1 digit
+    exp' <- option 0 parseExponent
+    return (sign, [], fracDigits, exp')
+  parseC = do
+    sign <- option '+' parseSign
+    intDigits <- many1 digit
+    exp' <- parseExponent
+    return (sign, intDigits, [], exp')
+  digitsToInteger :: [Char] -> Integer
+  digitsToInteger [] = 0
+  digitsToInteger (d:ds) = (fromIntegral $ digitToInt d) * ((10::Integer) ^ (length ds)) + digitsToInteger ds
+  digitsToFrac :: [Char] -> Rational
+  digitsToFrac [] = 0
+  digitsToFrac ds = (fromIntegral $ digitsToInteger ds) / ((10::Rational) ^ (length ds))
 
 instance FDFLParsable Integer where
   parse = parseInteger
@@ -675,8 +722,8 @@ TokenParser
   , stringLiteral = parseStringLiteral
   , integer = parseInteger
   , brackets = parseBrackets
-  , float = parseFloat
   , symbol = parseSymbol
+  , lexeme = parseLexeme
   } = makeTokenParser fdflDef
 
 parseFDFL :: FDFLParser FDFLParseState
