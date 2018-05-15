@@ -10,7 +10,8 @@ import FDGEN.Discrete ( Discretised(..), Mesh(..), Field(..), Solve(..)
                       , getTimestepping, TemporalTerminal(..), solveGetGhostSizes
                       , meshGetField, BoundaryConditionType(..)
                       , meshGetInitialValue)
-import FDGEN.Algebra (Expression(..), PairSeq(..), expandSymbols)
+import FDGEN.Algebra (Expression(..), PairSeq(..), expandSymbols, fromSpecial, FunctionApplication(..)
+                     , UnaryFunction(..), BinaryFunction(..))
 import Control.Applicative ((<$>))
 import Data.Ratio (numerator, denominator)
 import FDGEN.Precedence ( PDoc(..), renderInfix, renderTerminal
@@ -422,15 +423,17 @@ buildDSLExpr translateSymbol = buildDSLExpr' . expandSymbols translateSymbol
     Product seq' -> buildPairSeq (1, (*)) (1, raiseInt) seq'
     ConstantFloat f -> DSLDouble f
     ConstantRational r -> buildRational r
-    Pi -> DSLDouble pi
-    Euler -> DSLDouble $ exp 1
-    Power a b -> DSLPow (buildDSLExpr' a) (buildDSLExpr' b)
-    Abs _ -> error $ "unhandled expression: " ++ show e
-    Signum _ -> error $ "unhandled expression: " ++ show e
-    Ln _ -> error $ "unhandled expression: " ++ show e
+    ConstantSpecial s -> DSLDouble $ fromSpecial s
+    Application app -> case app of
+      ApplyBinary Power a b -> DSLPow (buildDSLExpr' a) (buildDSLExpr' b)
+      ApplyUnary Abs _ -> error $ "unhandled expression: " ++ show e
+      ApplyUnary Signum _ -> error $ "unhandled expression: " ++ show e
+      ApplyUnary Ln _ -> error $ "unhandled expression: " ++ show e
+      ApplyUnary Cos a -> DSLCos $ buildDSLExpr' a
+      ApplyUnary Sin a -> DSLSin $ buildDSLExpr' a
+      _ -> error $ "unhandled expression: " ++ show app
     Diff _ _ _ -> error $ "unhandled expression: " ++ show e
     Int _ _ -> error $ "unhandled expression: " ++ show e
-    Function _ _ -> error $ "unhandled expression: " ++ show e
     where
     multRational a b = if b /= (-1)
       then a * (buildDSLExpr' $ ConstantRational b)

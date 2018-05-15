@@ -6,7 +6,8 @@ module FDGEN.Discrete (buildDiscreteForm, buildTemplateDictionary
                       , BoundaryCondition(..), EdgeDomain(..), solveGetGhostSizes
                       , meshGetField, BoundaryConditionType(..), Terminal(..)
                       , meshGetInitialValue) where
-import FDGEN.Algebra (Expression(..), diff, adamsBashforthGeneral, expandSymbols, substSymbols, rewriteFixedPoint, vars)
+import FDGEN.Algebra (Expression(..), diff, adamsBashforthGeneral, expandSymbols, substSymbols, rewriteFixedPoint
+                     , vars, FunctionApplication(..))
 import FDGEN.Tensor (Tensor, TensorIndex)
 import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, vListDoc)
 import FDGEN.Stencil (StencilSpec(..), Stencil(..), buildStencil, Stagger(..))
@@ -565,13 +566,13 @@ makeSemiDiscrete dimension expr = rewritten''
     FieldRef name tensorIndex -> SemiDiscreteFieldRef name tensorIndex (genericReplicate dimension 0)
     Direction i -> SemiDiscreteDirection i
   collapseDerivative e = case e of
-    Diff (Function (SemiDiscreteFieldRef name tensorIndex derivatives) dims) (SemiDiscreteDirection d) n ->
-      Function (SemiDiscreteFieldRef name tensorIndex derivatives') dims
+    Diff (Application (ApplyUserDefined (SemiDiscreteFieldRef name tensorIndex derivatives) dims)) (SemiDiscreteDirection d) n ->
+      Application $ ApplyUserDefined (SemiDiscreteFieldRef name tensorIndex derivatives') dims
       where
       derivatives' = (genericTake d derivatives) ++ [n + genericIndex derivatives d] ++ (genericDrop (d + 1) derivatives)
     _ -> e
   removeFunctions e = case e of
-    Function sym@(SemiDiscreteFieldRef _ _ _) _ -> Symbol sym
+    Application (ApplyUserDefined sym@(SemiDiscreteFieldRef _ _ _) _) -> Symbol sym
     _ -> e
 
 buildRHSDiscrete :: Mesh -> Solve ->
@@ -649,7 +650,7 @@ buildTensorRValue mesh fdfl expr = case expr of
     Just (Parser.FieldDef field) ->
       buildAccessTensor (Parser._fieldName field) (Parser._fieldRank field) constructor
         where
-        constructor name index = Function (FieldRef name index) directions
+        constructor name index = Application $ ApplyUserDefined (FieldRef name index) directions
     Just (Parser.FieldExprDef def) -> buildRValue def
     Just (Parser.NamedLiteralDef def) -> genScalar . Symbol $ ConstantRef (Parser.stringLiteralValue $ Parser._namedLiteralName def) []
     Just _ -> error $ "buildTensorRValue: unable to treat symbol as field: " ++ Parser.identifierValue ref

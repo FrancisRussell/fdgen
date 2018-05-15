@@ -2,7 +2,8 @@
 module FDGEN.Algebra ( Expression(..), subst, substSymbols, lagrange, diff, integrate, expand
                      , definiteIntegrate, adamsBashforth, adamsBashforthGeneral, vars
                      , polyCoeff, polyCoeffs, expandSymbols, rewrite, rewriteFixedPoint
-                     , PairSeq(..)) where
+                     , PairSeq(..), Special(..), fromSpecial, UnaryFunction(..), BinaryFunction(..)
+                     , FunctionApplication(..)) where
 import Data.Map.Strict (Map)
 import Data.Set (Set)
 import Data.List (genericIndex)
@@ -18,8 +19,64 @@ import qualified Data.Set as Set
 import qualified Control.Lens as Lens
 
 data SumTag
-
 data ProdTag
+
+data Special
+  = Euler
+  | Pi
+  deriving (Eq, Ord, Show)
+
+data UnaryFunction
+  = Cos
+  | Sin
+  | Tan
+  | Abs
+  | Signum
+  | Ln
+  deriving (Eq, Ord, Show)
+
+data BinaryFunction
+  = Power
+  deriving (Eq, Ord, Show)
+
+class ContainsFunction e where
+  functionName :: e -> String
+
+instance ContainsFunction UnaryFunction where
+  functionName f = case f of
+    Cos -> "cos"
+    Sin -> "sin"
+    Tan -> "tan"
+    Abs -> "abs"
+    Signum -> "sgn"
+    Ln -> "ln"
+
+instance ContainsFunction BinaryFunction where
+  functionName f = case f of
+    Power -> "pow"
+
+instance PrettyPrintable e => ContainsFunction (FunctionApplication e) where
+  functionName f = case f of
+    ApplyUnary fn _ -> functionName fn
+    ApplyBinary fn _ _ -> functionName fn
+    ApplyUserDefined sym _ -> prettyPrint sym
+
+data FunctionApplication e
+  = ApplyUnary UnaryFunction (Expression e)
+  | ApplyBinary BinaryFunction (Expression e) (Expression e)
+  | ApplyUserDefined e [Expression e]
+  deriving (Eq, Ord, Show)
+
+functionParams :: FunctionApplication e -> [Expression e]
+functionParams a = case a of
+  ApplyUnary _ e0 -> [e0]
+  ApplyBinary _ e0 e1 -> [e0, e1]
+  ApplyUserDefined _ params -> params
+
+fromSpecial :: (Floating a) => Special -> a
+fromSpecial s = case s of
+  Euler -> exp 1
+  Pi -> pi
 
 data Expression e
   = Symbol e
@@ -27,15 +84,10 @@ data Expression e
   | Product (PairSeq ProdTag e)
   | ConstantFloat Double
   | ConstantRational Rational
-  | Abs (Expression e)
-  | Signum (Expression e)
-  | Ln (Expression e)
   | Diff (Expression e) e Integer
   | Int (Expression e) e
-  | Function e [Expression e]
-  | Power (Expression e) (Expression e)
-  | Euler
-  | Pi
+  | Application (FunctionApplication e)
+  | ConstantSpecial Special
   deriving (Show, Eq, Ord)
 
 data RewriteState
@@ -206,22 +258,22 @@ simplifyPairSeq seq' = newExpr
 simplify :: Ord e => Expression e -> Expression e
 simplify (Product seq') = simplify' $ simplifyPairSeq seq'
 simplify (Sum seq') = simplify' $ simplifyPairSeq seq'
-simplify (Abs e) = simplify' . Abs $ simplify e
-simplify (Signum e) = simplify' . Signum $ simplify e
-simplify (Power a b) = simplify' $ Power (simplify a) (simplify b)
+simplify (Application (ApplyUnary Abs e)) = simplify' . Application . ApplyUnary Abs $ simplify e
+simplify (Application (ApplyUnary Signum e)) = simplify' . Application . ApplyUnary Signum $ simplify e
+simplify (Application (ApplyBinary Power a b)) = simplify' . Application $ ApplyBinary Power (simplify a) (simplify b)
 simplify e = simplify' e
 
 simplify' :: Ord e => Expression e -> Expression e
-simplify' (Abs (ConstantRational r)) = ConstantRational $ abs r
-simplify' (Abs (ConstantFloat f)) = ConstantFloat $ abs f
-simplify' (Signum (ConstantRational r)) = ConstantRational $ signum r
-simplify' (Signum (ConstantFloat f)) = ConstantFloat $ signum f
+simplify' (Application (ApplyUnary Abs (ConstantRational r))) = ConstantRational $ abs r
+simplify' (Application (ApplyUnary Abs (ConstantFloat f))) = ConstantFloat $ abs f
+simplify' (Application (ApplyUnary Signum (ConstantRational r))) = ConstantRational $ signum r
+simplify' (Application (ApplyUnary Signum (ConstantFloat f))) = ConstantFloat $ signum f
 simplify' (Diff e sym i) = genericIndex (iterate (diff' sym) e) i
 simplify' (Int e sym) = integrate' sym e
 simplify' expr@(Product seq') = case _psOverall seq' of
   0 -> 0
   _ -> expr
-simplify' (Power f (ConstantRational g)) = simplify $ raise f g
+simplify' (Application (ApplyBinary Power f (ConstantRational g))) = simplify $ raise f g
 simplify' e = e
 
 rewrite :: Ord e => (Expression e -> Expression e) -> Expression e -> Expression e
@@ -235,18 +287,16 @@ rewritePairSeq f = foldl' addTerm' empty . toPairs
 rewrite' :: Ord e => (Expression e -> Expression e) -> Expression e -> Expression e
 rewrite' f (Sum seq') = simplifyPairSeq $ rewritePairSeq f seq'
 rewrite' f (Product seq') = simplifyPairSeq $ rewritePairSeq f seq'
-rewrite' f (Abs e) = Abs . simplify' $ rewrite f e
-rewrite' f (Signum e) = Signum . simplify' $ rewrite f e
-rewrite' f (Ln e) = Ln . simplify' $ rewrite f e
 rewrite' f (Diff e sym n) = Diff (simplify' $ rewrite f e) (rewriteSymbol f sym) n
 rewrite' f (Int e sym) = Int (simplify' $ rewrite f e) (rewriteSymbol f sym)
-rewrite' f (Function sym params) = Function (rewriteSymbol f sym) $ (simplify' . rewrite f) <$> params
-rewrite' f (Power a b) = Power (simplify' $ rewrite f a) (simplify' $ rewrite f b)
+rewrite' f (Application a) = Application $ case a of
+  ApplyUnary fn e0 -> ApplyUnary fn (simplify' $ rewrite f e0)
+  ApplyBinary fn e0 e1 -> ApplyBinary fn (simplify' $ rewrite f e0) (simplify' $ rewrite f e1)
+  ApplyUserDefined sym params -> ApplyUserDefined (rewriteSymbol f sym) $ (simplify' . rewrite f) <$> params
 rewrite' _ e@(Symbol _) = e
 rewrite' _ e@(ConstantFloat _) = e
 rewrite' _ e@(ConstantRational _) = e
-rewrite' _ e@Euler = e
-rewrite' _ e@Pi = e
+rewrite' _ s@(ConstantSpecial _) = s
 
 rewriteSymbol :: (Expression e -> Expression f) -> e -> f
 rewriteSymbol f sym = case f (Symbol sym) of
@@ -266,17 +316,15 @@ expandSymbols f expr = simplify $ case expr of
   Symbol s -> f s
   ConstantFloat r -> ConstantFloat r
   ConstantRational r -> ConstantRational r
-  Abs e -> Abs $ expandSymbols f e
-  Ln e -> Ln $ expandSymbols f e
-  Signum e -> Signum $ expandSymbols f e
   Sum seq' -> Sum . fromPairs $ transformPair <$> toPairs seq'
   Product seq' -> Product . fromPairs $ transformPair <$> toPairs seq'
   Diff e sym i -> Diff (expandSymbols f e) (replaceSymbol sym) i
   Int e sym -> Int (expandSymbols f e) (replaceSymbol sym)
-  Function sym params -> Function (replaceSymbol sym) (expandSymbols f <$> params)
-  Power a b -> Power (expandSymbols f a) (expandSymbols f b)
-  Euler -> Euler
-  Pi -> Pi
+  Application a -> Application $ case a of
+    ApplyUnary fn e0 -> ApplyUnary fn (expandSymbols f e0)
+    ApplyBinary fn e0 e1 -> ApplyBinary fn (expandSymbols f e0) (expandSymbols f e1)
+    ApplyUserDefined sym params -> ApplyUserDefined (replaceSymbol sym) (expandSymbols f <$> params)
+  ConstantSpecial s -> ConstantSpecial s
   where
   transformPair (e, r) = (expandSymbols f e, r)
   replaceSymbol sym = case f sym of
@@ -303,16 +351,13 @@ depends syms (Product seq') =
   foldl (||) False $ map (\(a, _) -> depends syms a) $ toPairs seq'
 depends _ (ConstantFloat _) = False
 depends _ (ConstantRational _) = False
-depends _ Euler = False
-depends _ Pi = False
-depends syms (Abs expr) = depends syms expr
-depends syms (Signum expr) = depends syms expr
-depends syms (Ln expr) = depends syms expr
+depends _ (ConstantSpecial _) = False
 depends syms (Diff e _sym _) = depends syms e
 depends syms (Int e sym) = Set.member sym syms || depends syms e
-depends syms (Function sym params) =
-  foldl (||) (Set.member sym syms) (depends syms <$> params)
-depends syms (Power a b) = depends syms a || depends syms b
+depends syms (Application a) = case a of
+  ApplyUnary _ e0 -> depends syms e0
+  ApplyBinary _ e0 e1 -> depends syms e0 || depends syms e1
+  ApplyUserDefined sym params -> foldl (||) (Set.member sym syms) (depends syms <$> params)
 
 vars :: Ord e => Expression e -> Set e
 vars (Symbol s) = Set.singleton s
@@ -322,15 +367,13 @@ vars (Product seq') =
   foldl (Set.union) Set.empty $ map (\(a, _) -> vars a) (toPairs seq')
 vars (ConstantFloat _) = Set.empty
 vars (ConstantRational _) = Set.empty
-vars Euler = Set.empty
-vars Pi = Set.empty
-vars (Abs expr) = vars expr
-vars (Signum expr) = vars expr
-vars (Ln expr) = vars expr
+vars (ConstantSpecial _) = Set.empty
 vars (Diff e _sym _) = vars e
 vars (Int e sym) = Set.insert sym (vars e)
-vars (Function sym params) = foldl Set.union (Set.singleton sym) (vars <$> params)
-vars (Power a b) = Set.union (vars a) (vars b)
+vars (Application a) = case a of
+  ApplyUnary _ e0 -> vars e0
+  ApplyBinary _ e0 e1 -> Set.union (vars e0) (vars e1)
+  ApplyUserDefined sym params -> foldl Set.union (Set.singleton sym) (vars <$> params)
 
 polyCoeff :: Ord e => Expression e -> e -> Int -> Maybe (Expression e)
 polyCoeff expr sym power = (!! power) <$> (++ repeat 0) <$> polyCoeffs expr sym
@@ -373,15 +416,10 @@ polyCoeffs expr sym = if depends (Set.singleton sym) expr
     foldl (liftM2 multiplyCoeffs) (Just [1.0]) $ map (\(a, p) -> (flip raiseCoeffs $ p) =<< (polyCoeffs a sym)) (toPairs seq')
   polyCoeffs' n@(ConstantFloat _) = Just [n]
   polyCoeffs' n@(ConstantRational _) = Just [n]
-  polyCoeffs' n@Euler = Just [n]
-  polyCoeffs' n@Pi = Just [n]
-  polyCoeffs' (Abs _expr) = Nothing
-  polyCoeffs' (Signum _expr) = Nothing
-  polyCoeffs' (Ln _expr) = Nothing
+  polyCoeffs' s@(ConstantSpecial _) = Just [s]
   polyCoeffs' (Diff _expr _sym _power) = Nothing
   polyCoeffs' (Int _expr _sym) = Nothing
-  polyCoeffs' (Function _sym _params) = Nothing
-  polyCoeffs' (Power _a _b) = Nothing
+  polyCoeffs' (Application _) = Nothing
 
 extractElem :: [a] -> Int -> (a, [a])
 extractElem lst index = (elem', rest)
@@ -396,12 +434,18 @@ diff' :: Ord e => e -> Expression e -> Expression e
 diff' sym expression = case expression of
   ConstantFloat _ -> 0
   ConstantRational _ -> 0
-  Euler -> 0
-  Pi -> 0
+  ConstantSpecial _ -> 0
   Symbol s -> if s == sym then 1 else 0
-  Abs x -> Signum x * diff sym x
-  Signum _ -> 0
-  Ln x -> raise x (-1) * diff sym x
+  Application a -> case a of
+    ApplyUnary Abs x -> (Application $ ApplyUnary Signum x) * diff sym x
+    ApplyUnary Signum _ -> 0
+    ApplyUnary Ln x -> raise x (-1) * diff sym x
+    ApplyUnary Sin x -> (Application $ ApplyUnary Cos x) * diff sym x
+    ApplyUnary Cos x -> - (Application $ ApplyUnary Sin x) * diff sym x
+    ApplyBinary Power f g -> expression * b
+      where
+      b = (diff sym f) * g / f + (diff sym g) * (Application $ ApplyUnary Ln f)
+    _ -> diffNoun
   Sum seq' -> Sum $ fromPairs differentiatedPairs
     where
     differentiatedPairs = (\(a,b) -> (diff sym a, b)) <$> toPairs seq'
@@ -418,10 +462,6 @@ diff' sym expression = case expression of
   Int e s -> if sym == s
     then e
     else diffNoun
-  Function _ _ -> diffNoun
-  Power f g -> expression * b
-    where
-    b = (diff sym f) * g / f + (diff sym g) * Ln f
   where
   diffNoun = if depends (Set.singleton sym) expression
     then Diff expression sym 1
@@ -451,13 +491,12 @@ integrate sym = simplify . integrate' sym . expand
 
 integrate' :: Ord e => e -> Expression e -> Expression e
 integrate' sym expr = case expr of
-  Abs _ -> integrateByParts sym expr 1
-  Signum _ -> integrateByParts sym expr 1
-  Ln _ -> integrateByParts sym expr 1
+  Application (ApplyUnary Abs _) -> integrateByParts sym expr 1
+  Application (ApplyUnary Signum _) -> integrateByParts sym expr 1
+  Application (ApplyUnary Ln _) -> integrateByParts sym expr 1
   ConstantFloat _ -> Symbol sym * expr
   ConstantRational _ -> Symbol sym * expr
-  Euler -> Symbol sym * Euler
-  Pi -> Symbol sym * Pi
+  s@(ConstantSpecial _) -> Symbol sym * s
   Symbol s -> if s == sym
     then (Symbol s ^ (2 :: Integer)) * (fromRational $ 1 % 2)
     else Symbol s * Symbol sym
@@ -470,8 +509,7 @@ integrate' sym expr = case expr of
     integratedDep = integrateProductSeq sym dep
   Diff _ _ _ -> intNoun
   Int _ _ -> intNoun
-  Function _ _ -> intNoun
-  Power _ _ -> intNoun
+  Application _ -> intNoun
   where
   intNoun = if depends (Set.singleton sym) expr
     then Int expr sym
@@ -483,7 +521,7 @@ integrateProductSeq sym [(expr, exp')]
   | exp' == 0       = symExpr
   | expr == symExpr = if exp' /= -1
                         then raise symExpr (exp' + 1) / fromRational (exp' + 1)
-                        else Ln symExpr
+                        else Application $ ApplyUnary Ln symExpr
   | exp' == 1       = integrate sym expr
   | exp' > 1 && denominator exp' == 1 = integrateProductSeq sym [(expr, exp1 % 1), (expr, exp2 % 1)]
   | otherwise = error "Cannot integrate negative or fractional exponents of complex expression"
@@ -603,18 +641,18 @@ instance Ord e => Num (Expression e) where
   (+) a = simplify . add a
   (-) a = simplify . sub a
   (*) a = simplify . mul a
-  abs = simplify . Abs
-  signum = simplify . Signum
+  abs = simplify . Application . ApplyUnary Abs
+  signum = simplify . Application . ApplyUnary Signum
 
 instance Ord e => Fractional (Expression e) where
   fromRational = ConstantRational
   (/) a = simplify . divide a
 
 instance Ord e => Floating (Expression e) where
-  pi = Pi
-  exp = simplify . Power Euler
-  log = Ln
-  (**) a = simplify . Power a
+  pi = ConstantSpecial Pi
+  exp = simplify . Application . ApplyBinary Power (ConstantSpecial Euler)
+  log = simplify . Application . ApplyUnary Ln
+  (**) a = simplify . Application . ApplyBinary Power a
   sin = error "sin: unimplemented"
   cos = error "cos: unimplemented"
   asin = error "asin: unimplemented"
@@ -669,14 +707,12 @@ instance PrettyPrintable e => PrettyPrintable (Expression e) where
       ConstantRational r -> renderRational r
       Sum seq' -> renderPairSeq seq' renderMultiplication renderAddition
       Product seq' -> renderPairSeq seq' renderPower renderMultiplication
-      Abs e -> renderFunction "abs" [toPDoc e]
-      Signum e -> renderFunction "sgn" [toPDoc e]
-      Ln e -> renderFunction "ln" [toPDoc e]
       Diff e s i -> renderFunction "diff" $ [toPDoc e, renderTerminal s] ++ if i == 1
         then []
         else [renderTerminal i]
       Int e s -> renderFunction "int" [toPDoc e, renderTerminal s]
-      Function sym params -> renderFunction (prettyPrint sym) (toPDoc <$> params)
-      Power a b -> renderFunction "pow" [toPDoc a, toPDoc b]
+      Application a -> renderFunction (functionName a) (toPDoc <$> (functionParams a))
+      ConstantSpecial s -> renderSpecial s
+    renderSpecial s = case s of
       Euler -> renderTerminal "e"
       Pi -> renderTerminal "pi"
