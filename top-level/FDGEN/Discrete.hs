@@ -99,19 +99,6 @@ instance PrettyPrintable TemporalTerminal
     DeltaT -> toDoc "h"
     PreviousDerivative i -> PrettyPrint.hcat $ toDoc <$> ["f(n-", show i, ")"]
 
-data SpatialTerminal
-  = SpatialDelta Integer
-  | FieldValue [Integer]
-  | Position Integer
-  deriving (Eq, Ord, Show)
-
-instance PrettyPrintable SpatialTerminal
-  where
-  toDoc t = case t of
-    SpatialDelta i -> toDoc $ "dx" ++ show i
-    FieldValue idx -> toDoc $ "y" ++ show idx
-    Position i -> toDoc $ "x" ++ show i
-
 data Discretised = Discretised
   { _discretisedLiterals :: Map String Rational
   , _discretisedMeshes :: [Mesh]
