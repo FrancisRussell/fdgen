@@ -1,7 +1,7 @@
 h = NamedLiteral(name="h", value=0.014)
 dt = NamedLiteral(name="dt", value=0.1)
 alpha = NamedLiteral(name="alpha", value=1e-4)
-n = NamedLiteral(name="n", value=60)
+n = NamedLiteral(name="n", value=253)
 u = Field(name="heat", rank=0)
 heat_eq = Equation(Dt(u), alpha * div(grad(u)))
 source = BoundaryCondition(u, 1, subdomains=["top", "bottom", "left"])
