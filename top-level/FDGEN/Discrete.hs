@@ -187,20 +187,6 @@ instance PrettyPrintable Solve
     , ("delta_t", toDoc $ _solveDeltaT solve)
     ]
 
-data Interpolation = Interpolation
-  { _interpolationOrder :: Integer
-  , _interpolationDerivatives :: [Integer]
-  , _interpolationExpression :: Expression SpatialTerminal
-  } deriving Show
-
-instance PrettyPrintable Interpolation
-  where
-  toDoc interp = structureDoc "Interpolation"
-    [ ("order", toDoc $ _interpolationOrder interp)
-    , ("derivatives", toDoc . show $ _interpolationDerivatives interp)
-    , ("expression", toDoc $ _interpolationExpression interp)
-    ]
-
 data BoundaryConditionType
   = Dirichlet
   | Neumann
