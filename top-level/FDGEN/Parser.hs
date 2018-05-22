@@ -100,6 +100,10 @@ data FieldExpr a
   | FieldTensorElements [FieldExpr a]
   | FieldPower (FieldExpr a) (FieldExpr a)
   | FieldExponent (FieldExpr a)
+  | FieldCos (FieldExpr a)
+  | FieldSin (FieldExpr a)
+  | FieldTan (FieldExpr a)
+  | FieldPi
   | FieldPosition
   deriving Show
 
@@ -123,6 +127,10 @@ instance PrettyPrintable a => PrettyPrintable (FieldExpr a)
     FieldTensorElements elements -> hcat [text "[", printList elements, text "]"]
     FieldPower a b -> function "pow" [toDoc a, toDoc b]
     FieldExponent a -> function "exp" [toDoc a]
+    FieldCos a -> function "cos" [toDoc a]
+    FieldSin a -> function "sin" [toDoc a]
+    FieldTan a -> function "tan" [toDoc a]
+    FieldPi -> text "pi"
     FieldPosition -> text "pos"
     where
       text = PrettyPrint.text
@@ -561,6 +569,9 @@ instance FDFLParsable (FieldExpr Identifier) where
       , parseUnary "Dt" FieldTemporalDerivative
       , parseUnary "Dn" FieldNormalDerivative
       , parseUnary "exp" FieldExponent
+      , parseUnary "cos" FieldCos
+      , parseUnary "sin" FieldSin
+      , parseUnary "tan" FieldTan
       , parseBinary "inner" FieldInner
       , parseBinary "outer" FieldOuter
       , parseBinary "dot" FieldDot
@@ -569,6 +580,7 @@ instance FDFLParsable (FieldExpr Identifier) where
       , parseUnary "Dy" $ flip FieldSpatialDerivative 1
       , parseUnary "Dz" $ flip FieldSpatialDerivative 2
       , parseReserved "pos" >> return FieldPosition
+      , parseReserved "pi" >> return FieldPi
       , FieldLiteral <$> parse
       , FieldRef <$> (parse >>= isFieldLike)
       , parseParens expr

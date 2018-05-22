@@ -7,7 +7,9 @@ f0 = NamedLiteral(name="f0", value=4.46e-5)
 beta = NamedLiteral(name="beta", value=2.e-11)
 H = NamedLiteral(name="h0", value=500.0)
 hx = NamedLiteral(name="hx", value=34800.0)
+hy = hx
 nx = NamedLiteral(name="nx", value=100)
+ny = nx
 e = Permutation()
 
 # Beta-plane approximation (variation in Coriolis is linear)
