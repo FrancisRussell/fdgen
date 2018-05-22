@@ -661,6 +661,10 @@ buildTensorRValue mesh fdfl expr = case expr of
     a' = Tensor.asScalar $ buildRValue a
     b' = Tensor.asScalar $ buildRValue b
   Parser.FieldExponent a -> genScalar $ exp (Tensor.asScalar $ buildRValue a)
+  Parser.FieldSin a -> genScalar $ sin (Tensor.asScalar $ buildRValue a)
+  Parser.FieldCos a -> genScalar $ cos (Tensor.asScalar $ buildRValue a)
+  Parser.FieldTan a -> genScalar $ tan (Tensor.asScalar $ buildRValue a)
+  Parser.FieldPi -> genScalar pi
   Parser.FieldPosition -> position
   where
   dimension = _meshDimension mesh
