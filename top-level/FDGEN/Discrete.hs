@@ -74,6 +74,7 @@ instance PrettyPrintable SemiDiscreteTerminal
 data DiscreteTerminal
   = FieldDataRef String TensorIndex [Integer]
   | ConstantDataRef String TensorIndex
+  | DiscreteDirection Integer
   deriving (Eq, Ord, Show)
 
 instance PrettyPrintable DiscreteTerminal
@@ -81,6 +82,7 @@ instance PrettyPrintable DiscreteTerminal
   toDoc t = case t of
     FieldDataRef name tensorIndex stencilIndex -> fieldRef name tensorIndex stencilIndex
     ConstantDataRef name index -> constantRef name index
+    DiscreteDirection index -> toDoc $ genericIndex ["x", "y", "z"] index
     where
     fieldRef name tensorIndex stencilIndex = PrettyPrint.hcat [toDoc name, indexDoc tensorIndex, indexDoc stencilIndex]
     constantRef name tensorIndex = PrettyPrint.hcat [toDoc name, indexDoc tensorIndex]
@@ -271,6 +273,7 @@ isMeshConstant expr = foldl (&&) True (isConstantSymbol <$> unknowns)
   isConstantSymbol s = case s of
     FieldDataRef _ _ _ -> False
     ConstantDataRef _ _ -> True
+    DiscreteDirection _ -> False
 
 buildDiscreteForm :: Parser.FDFL -> Discretised
 buildDiscreteForm fdfl = discretisedNoMeshes
@@ -613,7 +616,9 @@ buildRHSDiscrete mesh solve update = rhs
           , _stencilSpecStaggering = relativeStaggering
           }
         stencil = buildStencil stencilSpec
-      SemiDiscreteDirection _ -> error "Unexpected SemiDiscreteDirection found (should have been eliminated)."
+      SemiDiscreteDirection i -> ((Symbol $ DiscreteDirection i) + staggerOffset) * ((_meshGridSpacing mesh) `genericIndex` i)
+          where
+          staggerOffset = if genericIndex lhsStaggering i then 0.5 else 0.0
 
 computeStaggering :: [Bool] -> [Bool] -> [Stagger]
 computeStaggering first second = assert (length first == length second) zipWith computeStagger first second
@@ -759,6 +764,7 @@ expressionGetGhostSizes expr = result
   getGhost v = case v of
     FieldDataRef name tensorIndex stencilIndex -> Just (FieldLValue name tensorIndex, makeRange <$> stencilIndex)
     ConstantDataRef _ _ -> Nothing
+    DiscreteDirection _ -> Nothing
   makeRange i = (i, i)
 
 updateGetGhostSizes :: Update -> Map FieldLValue [(Integer, Integer)]

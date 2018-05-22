@@ -225,15 +225,15 @@ generateContext discretised = context
   where
   context = Context
     { _contextCellVariables = buildCellVariables meshInfo discretised mesh solve
-    , _contextBCDirectives = buildBCDirectives discretised mesh solve
+    , _contextBCDirectives = buildBCDirectives meshInfo discretised mesh solve
     , _contextMeshDimensions = oversizedDimensionsDSL
     }
   meshInfo = MeshInfo
     { _meshInfoMargins = margins
-    , _meshInfoDimensions = expandSymbols expandDiscreteTerminal <$> meshDimensions
-    , _meshInfoSpacing = expandSymbols expandDiscreteTerminal <$> (_meshGridSpacing mesh)
+    , _meshInfoDimensions = expandSymbols (expandDiscreteTerminal meshInfo) <$> meshDimensions
+    , _meshInfoSpacing = expandSymbols (expandDiscreteTerminal meshInfo) <$> (_meshGridSpacing mesh)
     }
-  meshDimensionsDSL = buildDSLExprInteger expandDiscreteTerminal <$> meshDimensions
+  meshDimensionsDSL = buildDSLExprInteger (expandDiscreteTerminal meshInfo) <$> meshDimensions
   ghostSizes = mergeGhostSizes meshDimension $ solveGetGhostSizes solve
   margins = (\(a,b) -> (abs a, abs b)) <$> ghostSizes
   oversizedDimensionsDSL = (\(a, (l, u)) -> a + fromInteger (l + u + 1)) <$> zip meshDimensionsDSL margins
@@ -246,12 +246,12 @@ buildCellVariables :: MeshInfo -> Discretised -> Mesh -> Solve -> [CellVariable]
 buildCellVariables meshInfo discretised mesh solve =
   concatMap (fieldToCellVariables meshInfo discretised mesh solve) (_meshFields mesh)
 
-buildBCDirectives :: Discretised -> Mesh -> Solve -> [BCDirective]
-buildBCDirectives discretised mesh solve =
-  concatMap (bcToDirectives discretised mesh solve) (_solveBoundaryConditions solve)
+buildBCDirectives :: MeshInfo -> Discretised -> Mesh -> Solve -> [BCDirective]
+buildBCDirectives meshInfo discretised mesh solve =
+  concatMap (bcToDirectives meshInfo discretised mesh solve) (_solveBoundaryConditions solve)
 
-bcToDirectives :: Discretised -> Mesh -> Solve -> BoundaryCondition -> [BCDirective]
-bcToDirectives _discretised mesh solve bc = buildDirective <$> edge_domains
+bcToDirectives :: MeshInfo -> Discretised -> Mesh -> Solve -> BoundaryCondition -> [BCDirective]
+bcToDirectives meshInfo _discretised mesh _solve bc = buildDirective <$> edge_domains
   where
   edge_domains = concatMapUniq translateEdgeDomain (_bcSubdomains bc)
   buildDirective edge_domain = BCDirective
@@ -263,21 +263,20 @@ bcToDirectives _discretised mesh solve bc = buildDirective <$> edge_domains
     , _bcDirectiveAction = action
     }
     where
+      expandDiscreteTerminal' = expandDiscreteTerminal meshInfo
       bcNormal = getEdgeDomainNormal edge_domain
       bcNormalDimension = axisDimension bcNormal
       bcValue = Tensor.asScalar $ _bcRHSDiscrete bc
-      bcValueDSL = buildDSLExpr expandDiscreteTerminal bcValue
-      bcValueDoubledDSL = buildDSLExpr expandDiscreteTerminal $ bcValue * 2
-      bcValueScaledDSL = buildDSLExpr expandDiscreteTerminal $ bcValue * spacing
+      bcValueDSL = buildDSLExpr expandDiscreteTerminal' bcValue
+      bcValueDoubledDSL = buildDSLExpr expandDiscreteTerminal' $ bcValue * 2
+      bcValueScaledDSL = buildDSLExpr expandDiscreteTerminal' $ bcValue * spacing
       spacing = (_meshGridSpacing mesh) !! bcNormalDimension
       fieldLValue = _bcField bc
       fieldName = getScalarFieldName fieldLValue
       bcType = _bcType bc
-      meshDimension = _meshDimension mesh
       meshDimensions = _meshDimensions mesh
-      makeIntegerExpr = buildDSLExprInteger expandDiscreteTerminal
-      ghostSizes = mergeGhostSizes meshDimension $ solveGetGhostSizes solve
-      margins = (\(a,b) -> (abs a, abs b)) <$> ghostSizes
+      makeIntegerExpr = buildDSLExprInteger expandDiscreteTerminal'
+      margins = _meshInfoMargins meshInfo
       field = meshGetField mesh fieldName
       fieldStaggeredNormal = (getSingleton "stagger" $ _fieldStaggerSpatial field) !! bcNormalDimension
       sign = normalSign edge_domain
@@ -316,15 +315,15 @@ getPreviousDerivative name offset = case offset of
   0 -> DSLCurrent . DSLCellVariable $ getDerivativeName name 0
   _ -> DSLCellVariable $ getDerivativeName name (offset - 1)
 
-generateTimestepping :: Solve -> Update -> String -> Integer -> DSLExpr
-generateTimestepping solve update name order = buildDSLExpr translateTerminal expr
+generateTimestepping :: MeshInfo -> Solve -> Update -> String -> Integer -> DSLExpr
+generateTimestepping meshInfo solve update name order = buildDSLExpr translateTerminal expr
   where
   expr = case getTimestepping update order of
     Just e -> e
     Nothing -> error $ "generateTimestepping: missing expression for order " ++ show order
   translateTerminal t = case t of
     PreviousValue -> Symbol $ DSLCellVariable name
-    DeltaT -> expandSymbols expandDiscreteTerminal $ _solveDeltaT solve
+    DeltaT -> expandSymbols (expandDiscreteTerminal meshInfo) $ _solveDeltaT solve
     PreviousDerivative i -> Symbol $ getPreviousDerivative name i
 
 fieldToCellVariables :: MeshInfo -> Discretised -> Mesh -> Solve -> Field -> [CellVariable]
@@ -343,16 +342,16 @@ fieldToCellVariables meshInfo _discretised mesh solve field = (cellVariable:cell
   cellVariableDerivatives = [cellVariableDerivative n | n <- [0..numDerivativesStored-1]]
   cellVariable = CellVariable
     { _cellVariableName = name
-    , _cellVariableExpr = generateTimestepping solve update name maxTemporalOrder
+    , _cellVariableExpr = generateTimestepping meshInfo solve update name maxTemporalOrder
     , _cellVariableInitialUpdate = if numDerivativesNeeded == 0
       then Nothing
-      else Just (numDerivativesNeeded, generateTimestepping solve update name 1)
+      else Just (numDerivativesNeeded, generateTimestepping meshInfo solve update name 1)
     , _cellVariableInitialExpr = getInitialExpr
     }
   cellVariableDerivative n = CellVariable
     { _cellVariableName = getDerivativeName name n
     , _cellVariableExpr = if n == 0
-      then buildDSLExpr expandDiscreteTerminal rhs
+      then buildDSLExpr (expandDiscreteTerminal meshInfo) rhs
       else getPreviousDerivative name n
     , _cellVariableInitialUpdate = Nothing
     , _cellVariableInitialExpr = Nothing
@@ -362,14 +361,17 @@ fieldToCellVariables meshInfo _discretised mesh solve field = (cellVariable:cell
     initial = Tensor.asScalar <$> meshGetInitialValue mesh name
     initialDSLExpr = buildDSLExpr (expandTerminal meshInfo staggering) <$> initial
 
-expandDiscreteTerminal :: DiscreteTerminal -> Expression DSLExpr
-expandDiscreteTerminal s = Symbol $ case s of
+expandDiscreteTerminal :: MeshInfo -> DiscreteTerminal -> Expression DSLExpr
+expandDiscreteTerminal meshInfo s = Symbol $ case s of
     FieldDataRef name [] offsets  -> case offsets of
       [0, 0] -> DSLCellVariable name
       [x, y] -> DSLOffset (DSLCellVariable name) (fromIntegral x) (fromIntegral y)
       _ -> error $ "Expected 2D stencil offset expression: " ++ show s
     ConstantDataRef _ _ -> error $ "No non-literal constants expected in FPGA backend (was constant folding applied?): " ++ show s
     FieldDataRef _ _ _  -> error $ "Expected no indices for field index expression (were tensor fields scalarized?): " ++ show s
+    DiscreteDirection i -> DSLGridIndex (fromIntegral i - margin)
+      where
+      margin = fromIntegral . fst $ genericIndex (_meshInfoMargins meshInfo) i
 
 expandTerminal :: MeshInfo -> [Bool] -> Discrete.Terminal -> Expression DSLExpr
 expandTerminal meshInfo staggering t = case t of

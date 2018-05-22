@@ -18,7 +18,7 @@ f = f0 + beta * pos[1]
 # Zonal wind
 tau = 0.12 * (cos(2.0 * pi * (pos[1] / (hy * ny) - 0.5)) + 2.0 * sin(pi * pos[1] / (hy * ny))) / (999.8 * H)
 
-V_Eq = Equation(Dt(u), nu * div(grad(u)) - dot(u, grad(u)) - g * grad(h))
+V_Eq = Equation(Dt(u), nu * div(grad(u)) - dot(u, grad(u)) - g * grad(h) + f*dot(e, u))
 H_Eq = Equation(Dt(h), -div((h + H) * u))
 V_BC = BoundaryCondition(u, [0, 0])
 H_BC = BoundaryCondition(Dn(h), 0)
