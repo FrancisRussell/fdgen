@@ -656,6 +656,12 @@ buildTensorRValue mesh fdfl expr = case expr of
       buildAccessTensor (Parser._fieldName field) (Parser._fieldRank field) constructor
         where
         constructor name index = Application $ ApplyUserDefined (FieldRef name index) directions
+    Just (Parser.FieldConstantDef function) ->
+      buildAccessTensor (Parser._fieldConstantName function) rank constructor
+        where
+        constructor name index = Application $ ApplyUserDefined (FieldRef name index) directions
+        rvalue = buildRValue $ Parser._fieldConstantExpression function
+        rank = Tensor.tensorRank rvalue
     Just (Parser.FieldExprDef def) -> buildRValue def
     Just (Parser.NamedLiteralDef def) -> genScalar . Symbol $ ConstantRef (Parser.stringLiteralValue $ Parser._namedLiteralName def) []
     Just _ -> error $ "buildTensorRValue: unable to treat symbol as field: " ++ Parser.identifierValue ref

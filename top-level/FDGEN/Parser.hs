@@ -5,7 +5,7 @@ module FDGEN.Parser ( parseInput, FDFL, getSymbols, Definition(..)
                     , FieldExpr(..), getFieldDef, LiteralConstant(..)
                     , MeshConstant(..), Identifier(..), StaggerStrategy(..)
                     , BoundaryCondition(..), NamedLiteral(..)
-                    , StringLiteral) where
+                    , StringLiteral, FieldConstant(..), getFieldConstantDef) where
 import Data.Char (toLower, digitToInt)
 import Data.Map (Map)
 import Data.Maybe (isJust)
@@ -160,10 +160,10 @@ instance PrettyPrintable NamedLiteral
    , ("value", toDoc  ((fromRational $ _namedLiteralValue literal)::Double))
    ]
 
-data MeshConstant = MeshConstant {
-  _meshConstantRank :: Integer,
-  _meshConstantName :: StringLiteral
-} deriving Show
+data MeshConstant = MeshConstant
+  { _meshConstantRank :: Integer
+  , _meshConstantName :: StringLiteral
+  } deriving Show
 
 instance PrettyPrintable MeshConstant
  where
@@ -171,6 +171,20 @@ instance PrettyPrintable MeshConstant
    [ ("rank", toDoc $ _meshConstantRank constant)
    , ("name", toDoc $ _meshConstantName constant)
    ]
+
+data FieldConstant = FieldConstant
+  { _fieldConstantName :: StringLiteral
+  , _fieldConstantExpression :: FieldExpr Identifier
+  , _fieldConstantStaggerStrategySpatial :: StaggerStrategy
+  } deriving Show
+
+instance PrettyPrintable FieldConstant
+  where
+  toDoc func = structureDoc "FieldConstant"
+    [ ("name", toDoc $ _fieldConstantName func)
+    , ("value", toDoc $ _fieldConstantExpression func)
+    , ("spatial_stagger", toDoc $ _fieldConstantStaggerStrategySpatial func)
+    ]
 
 data Equation = Equation {
   _fieldUpdateLHS :: FieldExpr Identifier,
@@ -223,6 +237,7 @@ data Definition
  | EquationDef Equation
  | BoundaryConditionDef BoundaryCondition
  | MeshConstantDef MeshConstant
+ | FieldConstantDef FieldConstant
  | NamedLiteralDef NamedLiteral
  | FieldExprDef (FieldExpr Identifier)
  | SolveDef Solve
@@ -236,6 +251,7 @@ instance PrettyPrintable Definition
    EquationDef e -> toDoc e
    BoundaryConditionDef bc -> toDoc bc
    MeshConstantDef c -> toDoc c
+   FieldConstantDef f -> toDoc f
    NamedLiteralDef l -> toDoc l
    FieldExprDef f -> toDoc  f
    SolveDef s -> toDoc s
@@ -269,6 +285,7 @@ Lens.makeLenses ''Mesh
 Lens.makeLenses ''Field
 Lens.makeLenses ''Equation
 Lens.makeLenses ''MeshConstant
+Lens.makeLenses ''FieldConstant
 Lens.makeLenses ''Solve
 Lens.makeLenses ''BoundaryCondition
 Lens.makeLenses ''NamedLiteral
@@ -343,6 +360,7 @@ isFieldLike = validateDefinition validate "field"
                          FieldDef _ -> True
                          FieldExprDef _ -> True
                          MeshConstantDef _ -> True
+                         FieldConstantDef _ -> True
                          NamedLiteralDef _ -> True
                          _ -> False
 
@@ -414,6 +432,14 @@ parseMeshConstant = ObjectParseSpec "MeshConstant"
   []
   [ buildAttributeSpec "name" True alwaysValid meshConstantName
   , buildAttributeSpec "rank" False alwaysValid meshConstantRank
+  ]
+
+parseFieldConstant :: ObjectParseSpec FieldConstant
+parseFieldConstant = ObjectParseSpec "FieldConstant"
+  []
+  [ buildAttributeSpec "name" True alwaysValid fieldConstantName
+  , buildAttributeSpec "spatial_staggering" False alwaysValid fieldConstantStaggerStrategySpatial
+  , buildAttributeSpec "value" True alwaysValid fieldConstantExpression
   ]
 
 parseNamedLiteral :: ObjectParseSpec NamedLiteral
@@ -522,6 +548,14 @@ instance FDFLObject MeshConstant where
   emptyObject = MeshConstant
     { _meshConstantName = error "undefined constantName"
     , _meshConstantRank = 0
+    }
+
+instance FDFLObject FieldConstant where
+  wrapObject = FieldConstantDef
+  emptyObject = FieldConstant
+    { _fieldConstantName = error "undefined fieldConstantName"
+    , _fieldConstantStaggerStrategySpatial = None
+    , _fieldConstantExpression = error "undefined fieldConstantExpression"
     }
 
 instance FDFLObject NamedLiteral where
@@ -710,6 +744,11 @@ getFieldDef fdfl ident = case getSymbol fdfl ident of
   Just (FieldDef f) -> f
   _ -> error $ "getFieldDef: unknown field " ++ identifierValue ident
 
+getFieldConstantDef :: FDFL -> Identifier -> FieldConstant
+getFieldConstantDef fdfl ident = case getSymbol fdfl ident of
+  Just (FieldConstantDef f) -> f
+  _ -> error $ "getFieldConstantDef: unknown constant field " ++ identifierValue ident
+
 addDefinition :: FDFL -> Identifier -> Definition -> Either String FDFL
 addDefinition fdfl symName def = if containsSymbol fdfl symName
   then Left $ "Attempt to redefine symbol " ++ identifierValue symName
@@ -769,6 +808,7 @@ parseDefinition = choice
   , parseSpecToParser parseEquation
   , parseSpecToParser parseBoundaryCondition
   , parseSpecToParser parseMeshConstant
+  , parseSpecToParser parseFieldConstant
   , parseSpecToParser parseSolve
   , parseSpecToParser parseNamedLiteral
   , FieldExprDef <$> parse
