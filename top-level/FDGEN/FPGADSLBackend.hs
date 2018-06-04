@@ -31,6 +31,7 @@ data FPGADSLBackend = FPGADSLBackend
 
 data Context = Context
   { _contextCellVariables :: [CellVariable]
+  , _contextCellConstants :: [CellConstant]
   , _contextMeshDimensions :: [DSLExpr]
   , _contextBCDirectives :: [BCDirective]
   } deriving Show
@@ -40,6 +41,11 @@ data CellVariable = CellVariable
   , _cellVariableExpr :: DSLExpr
   , _cellVariableInitialUpdate :: Maybe (Integer, DSLExpr)
   , _cellVariableInitialExpr :: Maybe DSLExpr
+  } deriving Show
+
+data CellConstant = CellConstant
+  { _cellConstantName :: String
+  , _cellConstantExpr :: DSLExpr
   } deriving Show
 
 data BCDirective = BCDirective
@@ -225,6 +231,7 @@ generateContext discretised = context
   where
   context = Context
     { _contextCellVariables = buildCellVariables meshInfo discretised mesh solve
+    , _contextCellConstants = buildCellConstants meshInfo discretised mesh solve
     , _contextBCDirectives = buildBCDirectives meshInfo discretised mesh solve
     , _contextMeshDimensions = oversizedDimensionsDSL
     }
@@ -245,6 +252,10 @@ generateContext discretised = context
 buildCellVariables :: MeshInfo -> Discretised -> Mesh -> Solve -> [CellVariable]
 buildCellVariables meshInfo discretised mesh solve =
   concatMap (fieldToCellVariables meshInfo discretised mesh solve) (_meshFields mesh)
+
+buildCellConstants :: MeshInfo -> Discretised -> Mesh -> Solve -> [CellConstant]
+buildCellConstants meshInfo discretised mesh solve =
+  concatMap (fieldToCellConstants meshInfo discretised mesh solve) (_meshFields mesh)
 
 buildBCDirectives :: MeshInfo -> Discretised -> Mesh -> Solve -> [BCDirective]
 buildBCDirectives meshInfo discretised mesh solve =
@@ -326,40 +337,60 @@ generateTimestepping meshInfo solve update name order = buildDSLExpr translateTe
     DeltaT -> expandSymbols (expandDiscreteTerminal meshInfo) $ _solveDeltaT solve
     PreviousDerivative i -> Symbol $ getPreviousDerivative name i
 
+fieldToCellConstants :: MeshInfo -> Discretised -> Mesh -> Solve -> Field -> [CellConstant]
+fieldToCellConstants meshInfo _discretised mesh solve field =
+  case findFieldUpdate (FieldLValue (_fieldName field) []) solve of
+    Just _ -> []
+    Nothing -> [cellConstant]
+      where
+      name = _fieldName field
+      staggering = getSingleton "stagger" $ _fieldStaggerSpatial field
+      cellConstant = CellConstant
+        { _cellConstantName = name
+        , _cellConstantExpr = getInitialExpr
+        }
+      initial = Tensor.asScalar <$> meshGetInitialValue mesh name
+      initialDSLExpr = buildDSLExpr (expandTerminal meshInfo staggering) <$> initial
+      getInitialExpr = case initialDSLExpr of
+        Nothing -> error $ "Field " ++ name ++ " has neither an initial value or update"
+        Just expr -> expr
+
 fieldToCellVariables :: MeshInfo -> Discretised -> Mesh -> Solve -> Field -> [CellVariable]
-fieldToCellVariables meshInfo _discretised mesh solve field = (cellVariable:cellVariableDerivatives)
-  where
-  update = findFieldUpdate (FieldLValue (_fieldName field) []) solve
-  rhsTensor = _updateRHSDiscrete update
-  rhs = Tensor.asScalar rhsTensor
-  maxTemporalOrder = maxTimestepOrder update
-  -- For Euler updating, we do not need to know any previous derivatives, but since we don't incorporate
-  -- the derivative directly into the update expression we need to allocate an (unused) derivative.
-  numDerivativesNeeded = numPreviousTimestepsNeeded update maxTemporalOrder
-  numDerivativesStored = max numDerivativesNeeded 1
-  name = _fieldName field
-  staggering = getSingleton "stagger" $ _fieldStaggerSpatial field
-  cellVariableDerivatives = [cellVariableDerivative n | n <- [0..numDerivativesStored-1]]
-  cellVariable = CellVariable
-    { _cellVariableName = name
-    , _cellVariableExpr = generateTimestepping meshInfo solve update name maxTemporalOrder
-    , _cellVariableInitialUpdate = if numDerivativesNeeded == 0
-      then Nothing
-      else Just (numDerivativesNeeded, generateTimestepping meshInfo solve update name 1)
-    , _cellVariableInitialExpr = getInitialExpr
-    }
-  cellVariableDerivative n = CellVariable
-    { _cellVariableName = getDerivativeName name n
-    , _cellVariableExpr = if n == 0
-      then buildDSLExpr (expandDiscreteTerminal meshInfo) rhs
-      else getPreviousDerivative name n
-    , _cellVariableInitialUpdate = Nothing
-    , _cellVariableInitialExpr = Nothing
-    }
-  getInitialExpr = initialDSLExpr
-    where
-    initial = Tensor.asScalar <$> meshGetInitialValue mesh name
-    initialDSLExpr = buildDSLExpr (expandTerminal meshInfo staggering) <$> initial
+fieldToCellVariables meshInfo _discretised mesh solve field =
+  case findFieldUpdate (FieldLValue (_fieldName field) []) solve of
+    Nothing -> []
+    Just update -> (cellVariable:cellVariableDerivatives)
+      where
+      rhsTensor = _updateRHSDiscrete update
+      rhs = Tensor.asScalar rhsTensor
+      maxTemporalOrder = maxTimestepOrder update
+      -- For Euler updating, we do not need to know any previous derivatives, but since we don't incorporate
+      -- the derivative directly into the update expression we need to allocate an (unused) derivative.
+      numDerivativesNeeded = numPreviousTimestepsNeeded update maxTemporalOrder
+      numDerivativesStored = max numDerivativesNeeded 1
+      name = _fieldName field
+      staggering = getSingleton "stagger" $ _fieldStaggerSpatial field
+      cellVariableDerivatives = [cellVariableDerivative n | n <- [0..numDerivativesStored-1]]
+      cellVariable = CellVariable
+        { _cellVariableName = name
+        , _cellVariableExpr = generateTimestepping meshInfo solve update name maxTemporalOrder
+        , _cellVariableInitialUpdate = if numDerivativesNeeded == 0
+          then Nothing
+          else Just (numDerivativesNeeded, generateTimestepping meshInfo solve update name 1)
+        , _cellVariableInitialExpr = getInitialExpr
+        }
+      cellVariableDerivative n = CellVariable
+        { _cellVariableName = getDerivativeName name n
+        , _cellVariableExpr = if n == 0
+          then buildDSLExpr (expandDiscreteTerminal meshInfo) rhs
+          else getPreviousDerivative name n
+        , _cellVariableInitialUpdate = Nothing
+        , _cellVariableInitialExpr = Nothing
+        }
+      getInitialExpr = initialDSLExpr
+        where
+        initial = Tensor.asScalar <$> meshGetInitialValue mesh name
+        initialDSLExpr = buildDSLExpr (expandTerminal meshInfo staggering) <$> initial
 
 expandDiscreteTerminal :: MeshInfo -> DiscreteTerminal -> Expression DSLExpr
 expandDiscreteTerminal meshInfo s = Symbol $ case s of
@@ -458,13 +489,16 @@ buildDSLExpr translateSymbol = buildDSLExpr' . expandSymbols translateSymbol
       else (DSLDouble . fromIntegral $ numerator r) / (DSLDouble . fromIntegral $ denominator r)
 
 buildDictionary :: Context -> Template.Dict
-buildDictionary context = template'''
+buildDictionary context = Map.fromList
+    [ ("constant_fields", (Template.ListVal $ Template.DictVal <$> constantFieldDictionaries))
+    , ("fields", (Template.ListVal $ Template.DictVal <$> fieldDictionaries))
+    , ("boundary_conditions", (Template.ListVal $ Template.DictVal <$> bcDictionaries))
+    , ("width", (makeAtomicVal (_contextMeshDimensions context !! 0)))
+    , ("height", (makeAtomicVal (_contextMeshDimensions context !! 1)))
+    ]
   where
-  template = Template.insert "fields" (Template.ListVal $ Template.DictVal <$> fieldDictionaries) Template.emptyDict
-  template' = Template.insert "boundary_conditions" (Template.ListVal $ Template.DictVal <$> bcDictionaries) template
-  template'' = Template.insert "width" (makeAtomicVal (_contextMeshDimensions context !! 0)) template'
-  template''' = Template.insert "height" (makeAtomicVal (_contextMeshDimensions context !! 1)) template''
   fieldDictionaries = buildCellVariableDictionary <$> _contextCellVariables context
+  constantFieldDictionaries = buildCellConstantDictionary <$> _contextCellConstants context
   bcDictionaries = buildBCDirectiveDictionary <$> _contextBCDirectives context
 
 buildCellVariableDictionary :: CellVariable -> Template.Dict
@@ -486,6 +520,11 @@ buildCellVariableDictionary cellVariable = Map.fromList $
     Nothing -> []
     Just expr -> [("initial_value", makeAtomicVal expr)]
 
+buildCellConstantDictionary :: CellConstant -> Template.Dict
+buildCellConstantDictionary cellConstant = Map.fromList $
+  [ ("name", Template.StringVal $ _cellConstantName cellConstant)
+  , ("expression", makeAtomicVal $ _cellConstantExpr cellConstant)
+  ]
 
 makeAtomicVal :: PDocPrintable a => a -> Template.Val
 makeAtomicVal = Template.StringVal . renderDSLExpr . makeAtomic . pDocPrint

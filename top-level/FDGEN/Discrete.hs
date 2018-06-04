@@ -317,6 +317,10 @@ constantFoldDiscretised d = d
     , _meshDimensions = substDiscreteTerminals <$> _meshDimensions mesh
     , _meshGridSpacing = substDiscreteTerminals <$> _meshGridSpacing mesh
     , _meshInitialValues  = (\(a, b) -> (a, substTerminals <$> b)) <$> _meshInitialValues mesh
+    , _meshFields = updateField mesh <$> _meshFields mesh
+    }
+  updateField _mesh field = field
+    { _fieldInitial = substTerminals <$> _fieldInitial field
     }
   updateSolve mesh solve = solve
     { _solveUpdates = updateUpdate mesh solve <$> _solveUpdates solve
@@ -732,10 +736,11 @@ numPreviousTimestepsNeeded update order = foldl max 0 unknownsDerivatives
     PreviousDerivative n -> Just n
     _ -> Nothing
 
-findFieldUpdate :: FieldLValue -> Solve -> Update
+findFieldUpdate :: FieldLValue -> Solve -> Maybe Update
 findFieldUpdate lhs solve = case matchingUpdates of
-  [update] -> update
-  _ -> error $ "findFieldUpdateRHS: Unable to find update for " ++ show lhs
+  [update] -> Just update
+  [] -> Nothing
+  _ -> error $ "findFieldUpdate: Too many updates for field " ++ show lhs
   where
   updates = _solveUpdates solve
   matchingUpdates = filter (\u -> getLValue u == lhs) updates

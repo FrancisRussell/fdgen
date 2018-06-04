@@ -8,6 +8,11 @@ ${for field in fields}
 ${field.name} = CellVariable "${field.name}"
 ${end}
 
+${for field in constant_fields}
+${field.name} = CellConstant "${field.name}" ${field.expression}
+
+${end}
+
 model = do
   setWidth ${width}
 
