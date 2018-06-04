@@ -65,23 +65,28 @@ instance PrettyPrintable Mesh
     , ("initial", hListDoc $ hPairDoc <$> _meshInitialValues mesh)
     ]
 
-data Field = Field {
-  _fieldName :: StringLiteral,
-  _fieldRank :: Integer,
-  _fieldSymmetric :: Bool,
-  _fieldStaggerStrategySpatial :: StaggerStrategy,
-  _fieldStaggerStrategyTemporal :: StaggerStrategy
-} deriving Show
+data Field = Field
+  { _fieldName :: StringLiteral
+  , _fieldRank :: Integer
+  , _fieldSymmetric :: Bool
+  , _fieldInitial :: Maybe (FieldExpr Identifier)
+  , _fieldStaggerStrategySpatial :: StaggerStrategy
+  , _fieldStaggerStrategyTemporal :: StaggerStrategy
+  } deriving Show
 
 instance PrettyPrintable Field
   where
-  toDoc field = structureDoc "Field"
+  toDoc field = structureDoc "Field" $
     [ ("name", toDoc $ _fieldName field)
     , ("rank", toDoc $ _fieldRank field)
     , ("symmetric", toDoc $ _fieldSymmetric field)
     , ("spatial_stagger", toDoc $ _fieldStaggerStrategySpatial field)
     , ("temporal_stagger", toDoc $ _fieldStaggerStrategyTemporal field)
-    ]
+    ] ++ maybeInitial
+    where
+    maybeInitial = case _fieldInitial field of
+      Nothing -> []
+      Just expr -> [("initial", toDoc expr)]
 
 data FieldExpr a
   = FieldRef a
@@ -381,6 +386,7 @@ parseField = ObjectParseSpec "Field" []
   , buildAttributeSpec "symmetric" False alwaysValid fieldSymmetric
   , buildAttributeSpec "spatial_staggering" False alwaysValid fieldStaggerStrategySpatial
   , buildAttributeSpec "temporal_staggering" False alwaysValid fieldStaggerStrategyTemporal
+  , buildAttributeSpec "initial" False alwaysValid fieldInitial
   ]
 
 parseMesh :: ObjectParseSpec Mesh
@@ -486,6 +492,7 @@ instance FDFLObject Field where
     { _fieldSymmetric = False
     , _fieldName = error "undefined fieldName"
     , _fieldRank = error "undefined fieldRank"
+    , _fieldInitial = Nothing
     , _fieldStaggerStrategySpatial = None
     , _fieldStaggerStrategyTemporal = None
     }

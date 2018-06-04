@@ -12,12 +12,13 @@ nx = NamedLiteral(name="nx", value=100)
 ny = nx
 e = Permutation()
 
+# Zonal wind
+tau_expression = [0.12 * (cos(2.0 * pi * (pos[1] / (hy * ny))) + 2.0 * sin(pi * pos[1] / (hy * ny))) / (999.8 * H), 0]
+tau = Field(name="tau", rank=1, initial=tau_expression, spatial_staggering="dimension")
+
 # Beta-plane approximation (variation in Coriolis is linear)
 f = f0 + beta * pos[1]
 
-# Zonal wind
-tau_expression = [0.12 * (cos(2.0 * pi * (pos[1] / (hy * ny))) + 2.0 * sin(pi * pos[1] / (hy * ny))) / (999.8 * H), 0]
-tau = FieldConstant(name="tau", value=tau_expression, spatial_staggering="dimension")
 
 V_Eq = Equation(Dt(u), nu * div(grad(u)) - dot(u, grad(u)) - g * grad(h) + f*dot(e, u) + tau)
 H_Eq = Equation(Dt(h), -div((h + H) * u))

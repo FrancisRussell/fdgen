@@ -143,16 +143,18 @@ data Field = Field
   { _fieldName :: String
   , _fieldRank :: Integer
   , _fieldSymmetric :: Bool
+  , _fieldInitial :: Tensor (Expression Terminal)
   , _fieldStaggerSpatial :: [[Bool]]
   , _fieldStaggerTemporal :: Bool
 } deriving Show
 
 instance PrettyPrintable Field
   where
-  toDoc field = structureDoc "Field"
+  toDoc field = structureDoc "Field" $
     [ ("name", toDoc $ _fieldName field)
     , ("rank", toDoc $ _fieldRank field)
     , ("symmetric", toDoc $ _fieldSymmetric field)
+    , ("initial", toDoc $ _fieldInitial field)
     , ("spatial_staggering", hListDoc $ hListDoc <$> _fieldStaggerSpatial field)
     , ("temporal_staggering", toDoc $ _fieldStaggerTemporal field)
     ]
@@ -475,9 +477,10 @@ buildLiteral _fdfl namedLiteral = (name, value)
   value = Parser._namedLiteralValue namedLiteral
 
 buildField :: Mesh -> Parser.FDFL -> Parser.Field -> Field
-buildField mesh _ field = Field
+buildField mesh fdfl field = Field
   { _fieldName = name
   , _fieldRank = rank
+  , _fieldInitial = initial
   , _fieldSymmetric = Parser._fieldSymmetric field
   , _fieldStaggerSpatial = staggering
   , _fieldStaggerTemporal = False -- TODO: implement me
@@ -487,6 +490,9 @@ buildField mesh _ field = Field
   rank = Parser._fieldRank field
   dimension = _meshDimension mesh
   numElements = dimension ^ rank
+  initial = case Parser._fieldInitial field of
+    Nothing -> Tensor.constructTensor dimension rank (genericTake numElements $ repeat $ fromRational 0)
+    Just i -> buildTensorRValue mesh fdfl i
   staggering = case Parser._fieldStaggerStrategySpatial field of
     Parser.None -> genericReplicate numElements $ genericReplicate dimension False
     Parser.All -> genericReplicate numElements $ genericReplicate dimension True
@@ -509,8 +515,8 @@ meshGetField mesh name = case filter (\f -> _fieldName f == name) (_meshFields m
 meshGetInitialValue :: Mesh -> String -> Maybe (Tensor (Expression Terminal))
 meshGetInitialValue mesh fieldName =
   case filter (\(name, _) -> fieldName == name) (_meshInitialValues mesh) of
-    [] -> Nothing
     ((_, expr):_) -> Just expr
+    [] -> Just . _fieldInitial $ meshGetField mesh fieldName
 
 discretiseMeshConstantExpr :: Expression Terminal -> Expression DiscreteTerminal
 discretiseMeshConstantExpr = substSymbols makeDiscreteConstant
