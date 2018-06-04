@@ -1,6 +1,5 @@
 module FDGEN.Stencil where
 import Control.Applicative ((<$>))
-import Control.Exception (assert)
 import Data.Char (chr, ord)
 import Data.List (genericIndex, genericLength)
 import Data.Map (Map)
@@ -55,7 +54,9 @@ calculateStencilOffset :: Integer -> Stagger -> Integer
 calculateStencilOffset width stagger = - (width + staggerToInteger stagger) `div` 2
 
 buildStencil :: StencilSpec -> Stencil
-buildStencil spec = assert (length derivatives == length staggering) result
+buildStencil spec = case (length derivatives == length staggering) of
+  False -> error "buildStencil: mismatch between length of derivatives and staggering list"
+  True -> result
   where
   result = (expressionToStencil numDimensions interpolatedValue)
     { _stencilScalingPowers = negate <$> derivatives

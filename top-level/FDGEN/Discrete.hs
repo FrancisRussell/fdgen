@@ -13,7 +13,6 @@ import FDGEN.Pretty (PrettyPrintable(..), structureDoc, hListDoc, vListDoc)
 import FDGEN.Stencil (StencilSpec(..), Stencil(..), buildStencil, Stagger(..))
 import FDGEN.Util (mergeBoundingRange)
 import Control.Applicative ((<$>))
-import Control.Exception (assert)
 import Data.Maybe (catMaybes)
 import Data.List (genericIndex, genericTake, genericDrop, genericReplicate, genericLength, intersperse)
 import Data.Map.Strict (Map)
@@ -631,7 +630,9 @@ buildRHSDiscrete mesh solve update = rhs
           staggerOffset = if genericIndex lhsStaggering i then 0.5 else 0.0
 
 computeStaggering :: [Bool] -> [Bool] -> [Stagger]
-computeStaggering first second = assert (length first == length second) zipWith computeStagger first second
+computeStaggering first second = case (length first == length second) of
+  False -> error "computeStaggering: mismatch between length of staggering arrays"
+  True -> zipWith computeStagger first second
   where
   computeStagger f s = case (f, s) of
     (False, True) -> StaggerPos
