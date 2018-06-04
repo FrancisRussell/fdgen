@@ -371,6 +371,7 @@ scalarizeTensorFields m = updateMesh m
       { _fieldName = genFlattenedName (_fieldName field) suffix
       , _fieldStaggerSpatial = [staggering]
       , _fieldRank = 0
+      , _fieldInitial = Tensor.generateTensor dim 0 (const $ Tensor.getElement (_fieldInitial field) suffix)
       }
   updateInitial mesh (fieldName, expr) = genUpdate <$> suffixes
     where
