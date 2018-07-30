@@ -13,7 +13,7 @@ ny = nx
 e = Permutation()
 
 # Zonal wind
-tau_expression = [0.12 * (cos(2.0 * pi * (pos[1] / (hy * ny))) + 2.0 * sin(pi * pos[1] / (hy * ny))) / (999.8 * H), 0]
+tau_expression = [0.12 * (cos(2.0 * pi * (pos[1] / (hy * ny) - 0.5)) + 2.0 * sin(pi * (pos[1] / (hy * ny) - 0.5))) / (999.8 * H), 0]
 tau = Field(name="tau", rank=1, initial=tau_expression, spatial_staggering="dimension")
 
 # Beta-plane approximation (variation in Coriolis is linear)
