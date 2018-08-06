@@ -53,6 +53,14 @@ data Mesh = Mesh
   , _meshInitialValues :: [(StringLiteral, FieldExpr Identifier)]
 } deriving Show
 
+data Simulation = Simulation
+  { _simMesh :: Identifier
+  , _simWantedFields :: [Identifier]
+  , _simTimesteps :: Integer
+  , _simSampleGap :: Integer
+  , _simWarmUp :: Integer
+  } deriving Show
+
 instance PrettyPrintable Mesh
   where
   toDoc mesh = structureDoc "Mesh"
@@ -63,6 +71,16 @@ instance PrettyPrintable Mesh
     , ("spacing", hListDoc $ _meshGridSpacing mesh)
     , ("dimensions", hListDoc $ _meshGridDimensions mesh)
     , ("initial", hListDoc $ hPairDoc <$> _meshInitialValues mesh)
+    ]
+
+instance PrettyPrintable Simulation
+  where
+  toDoc sim = structureDoc "Simulation"
+    [ ("mesh", toDoc $ _simMesh sim)
+    , ("wanted_fields", hListDoc $ _simWantedFields sim)
+    , ("timesteps", toDoc $ _simTimesteps sim)
+    , ("sample_gap", toDoc $ _simSampleGap sim)
+    , ("warm_up", toDoc $ _simWarmUp sim)
     ]
 
 data Field = Field
@@ -231,6 +249,7 @@ data Definition
  | NamedLiteralDef NamedLiteral
  | FieldExprDef (FieldExpr Identifier)
  | SolveDef Solve
+ | SimulationDef Simulation
  deriving Show
 
 instance PrettyPrintable Definition
@@ -244,6 +263,7 @@ instance PrettyPrintable Definition
    NamedLiteralDef l -> toDoc l
    FieldExprDef f -> toDoc  f
    SolveDef s -> toDoc s
+   SimulationDef s -> toDoc s
 
 data StaggerStrategy
   = All
@@ -277,6 +297,7 @@ Lens.makeLenses ''MeshConstant
 Lens.makeLenses ''Solve
 Lens.makeLenses ''BoundaryCondition
 Lens.makeLenses ''NamedLiteral
+Lens.makeLenses ''Simulation
 
 emptyFDFL :: FDFL
 emptyFDFL = FDFL {
@@ -351,6 +372,13 @@ isFieldLike = validateDefinition validate "field"
                          NamedLiteralDef _ -> True
                          _ -> False
 
+isField :: Validator Identifier
+isField = validateDefinition validate "field"
+  where validate def = case def of
+                         FieldDef _ -> True
+                         _ -> False
+
+
 isSolve :: Validator Identifier
 isSolve = validateDefinition validate "solve"
   where validate def = case def of
@@ -362,10 +390,17 @@ isEquation = validateDefinition validate "equation"
   where validate def = case def of
                          EquationDef _ -> True
                          _ -> False
+
 isBoundaryCondition :: Validator Identifier
 isBoundaryCondition = validateDefinition validate "boundary condition"
   where validate def = case def of
                          BoundaryConditionDef _ -> True
+                         _ -> False
+
+isMesh :: Validator Identifier
+isMesh = validateDefinition validate "mesh"
+  where validate def = case def of
+                         MeshDef _ -> True
                          _ -> False
 
 parseKeywordParam :: FDFLParsable a => String -> Validator a
@@ -438,6 +473,17 @@ parseSolve = ObjectParseSpec "Solve"
   , buildAttributeSpec "equations" False (validateList isEquation >=> noDuplicates) solveEquations
   , buildAttributeSpec "boundary_conditions" False (validateList isBoundaryCondition >=> noDuplicates) solveBoundaryConditions
   , buildAttributeSpec "delta_t" True alwaysValid solveDeltaT
+  ]
+
+parseSimulation :: ObjectParseSpec Simulation
+parseSimulation = ObjectParseSpec "Simulation"
+  []
+  [ buildAttributeSpec "mesh" True isMesh simMesh
+  -- FIXME: no way to validate if mesh contains specified fields
+  , buildAttributeSpec "wanted_fields" True  (validateList isField) simWantedFields
+  , buildAttributeSpec "num_timesteps" True alwaysValid simTimesteps
+  , buildAttributeSpec "sample_every" False alwaysValid simSampleGap
+  , buildAttributeSpec "warm_up" False alwaysValid simWarmUp
   ]
 
 validateAttributes :: [AttributeSpec s] -> [AttributeUpdate s]
@@ -547,6 +593,16 @@ instance FDFLObject Solve where
     , _solveEquations = []
     , _solveBoundaryConditions = []
     , _solveDeltaT = error "undefined solveDeltaT"
+    }
+
+instance FDFLObject Simulation where
+  wrapObject = SimulationDef
+  emptyObject = Simulation
+    { _simMesh = error "undefined simMesh"
+    , _simWantedFields = []
+    , _simTimesteps = error "undefined simTimesteps"
+    , _simSampleGap = 1
+    , _simWarmUp = 0
     }
 
 class FDFLParsable a where
@@ -778,6 +834,7 @@ parseDefinition = choice
   , parseSpecToParser parseMeshConstant
   , parseSpecToParser parseSolve
   , parseSpecToParser parseNamedLiteral
+  , parseSpecToParser parseSimulation
   , FieldExprDef <$> parse
   ]
 
