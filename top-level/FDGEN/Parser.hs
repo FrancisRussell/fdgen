@@ -25,40 +25,46 @@ import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Text.PrettyPrint as PrettyPrint
 
+-- |An identifier in an FDFL file
 data Identifier = Identifier String
   deriving (Show, Ord, Eq)
 
 instance PrettyPrintable Identifier where
   toDoc (Identifier i) = PrettyPrint.text i
 
+-- |A string literal in an FDFL file
 data StringLiteral = StringLiteral String
   deriving (Show, Ord, Eq)
 
 instance PrettyPrintable StringLiteral where
   toDoc (StringLiteral s) = PrettyPrint.text $ show s
 
+-- |Converts a string literal to a string
 stringLiteralValue :: StringLiteral -> String
 stringLiteralValue (StringLiteral v) = v
 
+-- |Converts an identifier to a string
 identifierValue :: Identifier -> String
 identifierValue (Identifier v) = v
 
+-- |Parser-level representation of a mesh
 data Mesh = Mesh
-  { _meshName :: StringLiteral
-  , _meshDimension :: Integer
-  , _meshFields :: [Identifier]
-  , _meshSolves :: [Identifier]
-  , _meshGridSpacing :: [FieldExpr Identifier]
-  , _meshGridDimensions :: [FieldExpr Identifier]
-  , _meshInitialValues :: [(StringLiteral, FieldExpr Identifier)]
+  { _meshName :: StringLiteral -- ^ The name of the mesh
+  , _meshDimension :: Integer -- ^ The dimension of the mesh
+  , _meshFields :: [Identifier] -- ^ A list of fields present on the mesh
+  , _meshSolves :: [Identifier] -- ^ A list of solve operations that can be applied to the mesh
+  , _meshGridSpacing :: [FieldExpr Identifier] -- ^ Expressions describing the distance between grid points in each dimension
+  , _meshGridDimensions :: [FieldExpr Identifier] -- ^ Expressions describing the number of cells (not points) in each dimension
+  , _meshInitialValues :: [(StringLiteral, FieldExpr Identifier)] -- ^ A list of name-value pairs giving an initial value for specified fields (otherwise all components are 0-valued)
 } deriving Show
 
+-- |Parser-level representation of complete simulation
 data Simulation = Simulation
-  { _simMesh :: Identifier
-  , _simWantedFields :: [Identifier]
-  , _simTimesteps :: Integer
-  , _simSampleGap :: Integer
-  , _simWarmUp :: Integer
+  { _simMesh :: Identifier -- ^ The mesh on which the simulation occurs
+  , _simWantedFields :: [Identifier] -- ^ The fields whose values should be sampled
+  , _simTimesteps :: Integer -- ^ The number of time steps to execute the simulation for
+  , _simSampleGap :: Integer -- ^ The number of time steps between each sample
+  , _simWarmUp :: Integer -- ^ The number of time steps to discard from the start of the simulation
   } deriving Show
 
 instance PrettyPrintable Mesh
@@ -83,13 +89,14 @@ instance PrettyPrintable Simulation
     , ("warm_up", toDoc $ _simWarmUp sim)
     ]
 
+-- |Parser-level representation of a field
 data Field = Field
-  { _fieldName :: StringLiteral
-  , _fieldRank :: Integer
-  , _fieldSymmetric :: Bool
-  , _fieldInitial :: Maybe (FieldExpr Identifier)
-  , _fieldStaggerStrategySpatial :: StaggerStrategy
-  , _fieldStaggerStrategyTemporal :: StaggerStrategy
+  { _fieldName :: StringLiteral -- ^ The name of the field
+  , _fieldRank :: Integer -- ^ The tensor rank of a field
+  , _fieldSymmetric :: Bool -- ^ Whether the field is symmetric (ignored)
+  , _fieldInitial :: Maybe (FieldExpr Identifier) -- ^ An initial expression for a field (overriden by any specified by a mesh)
+  , _fieldStaggerStrategySpatial :: StaggerStrategy -- ^ The spatial staggering strategy for the scalar components
+  , _fieldStaggerStrategyTemporal :: StaggerStrategy -- ^ The temporal staggering strategy for the scalar components (ignored)
   } deriving Show
 
 instance PrettyPrintable Field
@@ -106,28 +113,30 @@ instance PrettyPrintable Field
       Nothing -> []
       Just expr -> [("initial", toDoc expr)]
 
+-- | A general expression type that can represent tensor-valued field expressions, but also scalar valued and
+-- mesh-independent expressions.
 data FieldExpr a
-  = FieldRef a
-  | FieldLiteral LiteralConstant
-  | FieldAddition (FieldExpr a) (FieldExpr a)
-  | FieldDivision (FieldExpr a) (FieldExpr a)
-  | FieldInner (FieldExpr a) (FieldExpr a)
-  | FieldOuter (FieldExpr a) (FieldExpr a)
-  | FieldDot (FieldExpr a) (FieldExpr a)
-  | FieldGradient (FieldExpr a)
-  | FieldDivergence (FieldExpr a)
-  | FieldSpatialDerivative (FieldExpr a) Integer
-  | FieldTemporalDerivative (FieldExpr a)
-  | FieldNormalDerivative (FieldExpr a)
-  | FieldIndexOperation [Integer] (FieldExpr a)
-  | FieldTensorElements [FieldExpr a]
-  | FieldPower (FieldExpr a) (FieldExpr a)
-  | FieldExponent (FieldExpr a)
-  | FieldCos (FieldExpr a)
-  | FieldSin (FieldExpr a)
-  | FieldTan (FieldExpr a)
-  | FieldPi
-  | FieldPosition
+  = FieldRef a -- ^ A reference to a field
+  | FieldLiteral LiteralConstant -- ^ A constant tensor-valued quantity
+  | FieldAddition (FieldExpr a) (FieldExpr a) -- ^ Addition of identical rank fields
+  | FieldDivision (FieldExpr a) (FieldExpr a) -- ^ Division of field by a scalar
+  | FieldInner (FieldExpr a) (FieldExpr a) -- ^ Inner product
+  | FieldOuter (FieldExpr a) (FieldExpr a) -- ^ Outer product
+  | FieldDot (FieldExpr a) (FieldExpr a) -- ^ Dot product
+  | FieldGradient (FieldExpr a) -- ^ Gradient operator
+  | FieldDivergence (FieldExpr a) -- ^ Divergence operator
+  | FieldSpatialDerivative (FieldExpr a) Integer -- ^ Spatial derivative in specified dimension
+  | FieldTemporalDerivative (FieldExpr a) -- ^ Temporal derivative
+  | FieldNormalDerivative (FieldExpr a) -- ^ Normal derivative (only valid at an edge)
+  | FieldIndexOperation [Integer] (FieldExpr a) -- ^ Tensor indexing operation
+  | FieldTensorElements [FieldExpr a] -- ^ Constructs a field from a list of fields of lower rank
+  | FieldPower (FieldExpr a) (FieldExpr a) -- ^ Scalar power operation
+  | FieldExponent (FieldExpr a) -- ^ Raises e to the scalar operand
+  | FieldCos (FieldExpr a) -- ^ Cosine on scalar operand
+  | FieldSin (FieldExpr a) -- ^ Sine on scalar operand
+  | FieldTan (FieldExpr a) -- ^ Tangent on scalar operand
+  | FieldPi -- ^ The constant Pi
+  | FieldPosition -- ^ Position coordinate on the mesh
   deriving Show
 
 instance PrettyPrintable a => PrettyPrintable (FieldExpr a)
@@ -166,14 +175,16 @@ instance PrettyPrintable a => PrettyPrintable (FieldExpr a)
         prefix = text $ name ++ "("
         suffix = text ")"
 
+-- | A tensor valued compile-time constant value
 data LiteralConstant
-  = ScalarConstant Rational
-  | PermutationSymbol
+  = ScalarConstant Rational -- ^ A scalar-valued rational value
+  | PermutationSymbol -- ^ The permutation symbol of appropriate rank
   deriving Show
 
+-- | A compile-time constant value given a name to ease debugging
 data NamedLiteral = NamedLiteral
-  { _namedLiteralName :: StringLiteral
-  , _namedLiteralValue :: Rational
+  { _namedLiteralName :: StringLiteral -- ^ The name of the value e.g. "g"
+  , _namedLiteralValue :: Rational -- ^ The literal value e.g. "9.81"
   } deriving Show
 
 instance PrettyPrintable NamedLiteral
@@ -183,9 +194,11 @@ instance PrettyPrintable NamedLiteral
    , ("value", toDoc  ((fromRational $ _namedLiteralValue literal)::Double))
    ]
 
+-- | A tensor-valued quantity that is constant over the mesh, but not necessarily compile-time constant. The backend
+-- will need to provide a mechanism so that such values can be set.
 data MeshConstant = MeshConstant {
-  _meshConstantRank :: Integer,
-  _meshConstantName :: StringLiteral
+  _meshConstantRank :: Integer, -- ^ The constant's rank
+  _meshConstantName :: StringLiteral -- ^ The constant's name
 } deriving Show
 
 instance PrettyPrintable MeshConstant
@@ -195,9 +208,10 @@ instance PrettyPrintable MeshConstant
    , ("name", toDoc $ _meshConstantName constant)
    ]
 
+-- | Represents a equation defining either the value of a field
 data Equation = Equation {
-  _fieldUpdateLHS :: FieldExpr Identifier,
-  _fieldUpdateRHS :: FieldExpr Identifier
+  _fieldUpdateLHS :: FieldExpr Identifier, -- ^ The value being defined
+  _fieldUpdateRHS :: FieldExpr Identifier -- ^ The value to be assigned
 } deriving Show
 
 instance PrettyPrintable Equation
@@ -207,10 +221,11 @@ instance PrettyPrintable Equation
    , ("rhs", toDoc $ _fieldUpdateRHS equ)
    ]
 
+-- | Represents a boundary condition
 data BoundaryCondition = BoundaryCondition {
-  _bcLHS :: FieldExpr Identifier,
-  _bcRHS :: FieldExpr Identifier,
-  _bcSubdomains :: Maybe [StringLiteral]
+  _bcLHS :: FieldExpr Identifier, -- ^ The boundary being defined
+  _bcRHS :: FieldExpr Identifier, -- ^ The value for the boundary
+  _bcSubdomains :: Maybe [StringLiteral] -- ^ The names of the boundary subdomains
 } deriving Show
 
 instance PrettyPrintable BoundaryCondition
@@ -220,13 +235,14 @@ instance PrettyPrintable BoundaryCondition
    , ("rhs", toDoc $ _bcRHS bc)
    ]
 
+-- | Represents the mesh update operation applied in a single time step.
 data Solve = Solve
-  { _solveName :: StringLiteral
-  , _solveSpatialOrder :: Integer
-  , _solveTemporalOrder :: Integer
-  , _solveEquations :: [Identifier]
-  , _solveBoundaryConditions :: [Identifier]
-  , _solveDeltaT :: FieldExpr Identifier
+  { _solveName :: StringLiteral -- ^ The name of the solve
+  , _solveSpatialOrder :: Integer -- ^ The order of spatial accuracy to be used
+  , _solveTemporalOrder :: Integer -- ^ The order of temporal accuracy to be used
+  , _solveEquations :: [Identifier] -- ^ List of equations used to update fields
+  , _solveBoundaryConditions :: [Identifier] -- ^ List of boundary conditions to be applied
+  , _solveDeltaT :: FieldExpr Identifier -- ^ Expression for size of the timestep
 } deriving Show
 
 instance PrettyPrintable Solve
@@ -240,6 +256,7 @@ instance PrettyPrintable Solve
    , ("delta_t", toDoc $ _solveDeltaT solve)
    ]
 
+-- | Each FDFL identifier is associated with a definition
 data Definition
  = FieldDef Field
  | MeshDef Mesh
@@ -265,17 +282,19 @@ instance PrettyPrintable Definition
    SolveDef s -> toDoc s
    SimulationDef s -> toDoc s
 
+-- | A strategy for staggering scalar components for a tensor
 data StaggerStrategy
-  = All
-  | None
-  | Dimension
+  = All -- ^ All components are staggered
+  | None -- ^ None of the components are staggered
+  | Dimension -- ^ Each component is staggered in its respective dimension (only valid for rank-1 tensors)
   deriving (Bounded, Enum, Show)
 
 instance PrettyPrintable StaggerStrategy where
   toDoc = PrettyPrint.text . show
 
+-- | Parser representation of a parsed FDFL file
 data FDFL = FDFL {
-  symbols :: Map String Definition
+  symbols :: Map String Definition -- ^ Maps identifiers to definitions
 } deriving Show
 
 instance PrettyPrintable FDFL
@@ -285,6 +304,7 @@ instance PrettyPrintable FDFL
     fields = fieldDoc <$> (Map.assocs $ symbols fdfl)
     fieldDoc (name, value) = (name, toDoc value)
 
+-- | State used by the FDFL parser (currently just an FDFL that is populated)
 data FDFLParseState = FDFLParseState {
   _psFDFL :: FDFL
 } deriving Show
@@ -299,27 +319,39 @@ Lens.makeLenses ''BoundaryCondition
 Lens.makeLenses ''NamedLiteral
 Lens.makeLenses ''Simulation
 
+-- | Builds a valid unpopulated FDFL
 emptyFDFL :: FDFL
 emptyFDFL = FDFL {
   symbols = Map.empty
 }
 
+-- | Returns the identifier to definition mapping of an FDFL
 getSymbols :: FDFL -> Map String Definition
 getSymbols = symbols
 
+
+-- | Constructs the initial state for the FDFL parser
 emptyFDFLParseState :: FDFLParseState
 emptyFDFLParseState = FDFLParseState {
   _psFDFL = emptyFDFL
 }
 
+-- | The type of an FDFL sub-parser that returns an a
 type FDFLParser a = Parsec String FDFLParseState a
 
+-- | Type of an action used to validate a parsed value and throw an error at the parser-level if it is invalid
 type Validator a = a -> FDFLParser a
 
+-- | The result of parsing a positional parameter or key-value mapping in an FDFL file is an 'AttributeUpdate'. This contains a function
+-- that knows how to update a field of some 'FDFLObject' of type 's'. Since this function is opaque, we also store an attribute name, which
+-- can be used to determine if multiple updates for the same attribute exist.
 data AttributeUpdate s = AttributeUpdate String (s -> s)
 
+-- | Defines a positional parameter of the given name and a parser for it.
 data PositionalSpec s = PositionalSpec String (FDFLParser (AttributeUpdate s))
 
+-- | Defines an attribute parameter and a parser for it. The boolean parameter
+-- specifies if this attribute is required.
 data AttributeSpec s = AttributeSpec String Bool (FDFLParser (AttributeUpdate s))
 
 data ObjectParseSpec s
