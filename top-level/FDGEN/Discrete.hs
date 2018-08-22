@@ -503,6 +503,9 @@ buildField mesh fdfl field = Field
     Parser.Dimension -> case rank of
       1 -> [genericReplicate n False ++ [True] ++ genericReplicate (dimension-1-n) False | n <- [0..dimension-1]]
       _ -> error $ "Dimension staggering strategy is only defined for rank 1 tensors (" ++ name ++ ")."
+    Parser.InverseDimension -> case rank of
+      1 -> [genericReplicate n True ++ [False] ++ genericReplicate (dimension-1-n) True | n <- [0..dimension-1]]
+      _ -> error $ "InverseDimension staggering strategy is only defined for rank 1 tensors (" ++ name ++ ")."
 
 buildInitialValue :: Mesh -> Parser.FDFL -> (Parser.StringLiteral, Parser.FieldExpr Parser.Identifier) -> (String, Tensor (Expression Terminal))
 buildInitialValue mesh fdfl (pName, pExpr) = (fieldName, fieldExpr)

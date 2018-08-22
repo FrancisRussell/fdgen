@@ -6,7 +6,7 @@ module FDGEN.Parser ( parseInput, FDFL, getSymbols, Definition(..)
                     , MeshConstant(..), Identifier(..), StaggerStrategy(..)
                     , BoundaryCondition(..), NamedLiteral(..)
                     , StringLiteral) where
-import Data.Char (toLower, digitToInt)
+import Data.Char (digitToInt)
 import Data.Map (Map)
 import Data.Maybe (isJust)
 import Data.List (genericIndex)
@@ -287,6 +287,7 @@ data StaggerStrategy
   = All -- ^ All components are staggered
   | None -- ^ None of the components are staggered
   | Dimension -- ^ Each component is staggered in its respective dimension (only valid for rank-1 tensors)
+  | InverseDimension -- ^ Each component is staggered in all except its respective dimension (only valid for rank-1 tensors)
   deriving (Bounded, Enum, Show)
 
 instance PrettyPrintable StaggerStrategy where
@@ -717,11 +718,12 @@ instance FDFLParsable Bool where
 instance FDFLParsable StaggerStrategy where
   parse = parserFailEither $ matchWithEnum <$> parseStringLiteral
     where
-    values = [minBound .. maxBound]
-    mappings = Map.fromList $ (\e -> (toLower <$> show e, e)) <$> values
-    matchWithEnum str = case Map.lookup str mappings of
-      Just value -> Right value
-      Nothing -> Left $ "Invalid staggering strategy: " ++ str
+    matchWithEnum s = case s of
+      "all" -> Right All
+      "none" -> Right None
+      "dimension" -> Right Dimension
+      "inverse_dimension" -> Right InverseDimension
+      _ -> Left $ "Invalid staggering strategy: " ++ s
 
 instance FDFLParsable StringLiteral where
   parse = StringLiteral <$> parseStringLiteral
