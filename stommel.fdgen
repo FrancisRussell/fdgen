@@ -30,3 +30,5 @@ TimeStep = Solve(name="step", spatial_order=1, temporal_order=3, equations=[V_Eq
 
 m = Mesh(name="shallow_water", dim=2, fields=[u, h, tau], solves=[TimeStep], spacing=[hx, hx], 
   dimensions=[nx, nx], initial=[("h", 0.0)])
+
+s = Simulation(mesh=m, wanted_fields=[h], num_timesteps=2000, sample_every=20)
