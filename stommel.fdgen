@@ -1,5 +1,5 @@
-u = Field(name="u", rank=1, spatial_staggering="dimension")
-h = Field(name="h", rank=0)
+u = Field(name="u", rank=1, spatial_staggering="inverse_dimension")
+h = Field(name="h", rank=0, spatial_staggering="all")
 dt = NamedLiteral(name="dt", value=25.0)
 nu = NamedLiteral(name="nu", value=470.23)
 g = NamedLiteral(name="g", value=9.81)
