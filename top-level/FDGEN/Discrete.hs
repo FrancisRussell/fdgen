@@ -23,10 +23,11 @@ import qualified FDGEN.Tensor as Tensor
 import qualified FDGEN.Template as Template
 import qualified Text.PrettyPrint as PrettyPrint
 
+-- | A terminal value in continuous space
 data Terminal
-  = FieldRef String TensorIndex
-  | ConstantRef String TensorIndex
-  | Direction Integer
+  = FieldRef String TensorIndex -- ^ A reference to a field element
+  | ConstantRef String TensorIndex -- ^ A reference to an element of a mesh-constant value
+  | Direction Integer -- ^ A co-ordinate in the specified dimension
   deriving (Eq, Ord, Show)
 
 instance PrettyPrintable Terminal
@@ -41,10 +42,12 @@ instance PrettyPrintable Terminal
       indexDoc [] = PrettyPrint.empty
       indexDoc indices = toDoc $ show indices
 
+-- | A terminal value used during the discretisation process. The field terminals in this representation
+-- incorporate the number of derivatives taken in each dimension.
 data SemiDiscreteTerminal
-  = SemiDiscreteFieldRef String TensorIndex [Integer]
-  | SemiDiscreteConstantRef String TensorIndex
-  | SemiDiscreteDirection Integer
+  = SemiDiscreteFieldRef String TensorIndex [Integer] -- ^ A reference to a field element along with the number of derivatives taken in each dimension
+  | SemiDiscreteConstantRef String TensorIndex -- ^ A reference to an element of a mesh-constant value
+  | SemiDiscreteDirection Integer -- ^ The co-ordinate of the specified dimension
   deriving (Eq, Ord, Show)
 
 instance PrettyPrintable SemiDiscreteTerminal
@@ -70,10 +73,11 @@ instance PrettyPrintable SemiDiscreteTerminal
     indexDoc [] = PrettyPrint.empty
     indexDoc indices = toDoc $ show indices
 
+-- | A terminal value used by fully discretised expressions
 data DiscreteTerminal
-  = FieldDataRef String TensorIndex [Integer]
-  | ConstantDataRef String TensorIndex
-  | DiscreteDirection Integer
+  = FieldDataRef String TensorIndex [Integer] -- ^ A reference to an element of a field and stencil offsets in each dimension
+  | ConstantDataRef String TensorIndex -- ^ Reference to an element of a mesh-constant value
+  | DiscreteDirection Integer -- ^ Integer offset of grid-point in specified dimension
   deriving (Eq, Ord, Show)
 
 instance PrettyPrintable DiscreteTerminal
@@ -88,10 +92,11 @@ instance PrettyPrintable DiscreteTerminal
     indexDoc [] = PrettyPrint.empty
     indexDoc indices = toDoc $ show indices
 
+-- | Terminal value used for encoding time-stepping schemes
 data TemporalTerminal
-  = PreviousValue
-  | DeltaT
-  | PreviousDerivative Integer
+  = PreviousValue -- ^ The previous value of the field
+  | DeltaT -- ^ The time-step size (e.g.) h
+  | PreviousDerivative Integer -- ^ The nth previous derivative
   deriving (Eq, Ord, Show)
 
 instance PrettyPrintable TemporalTerminal
@@ -101,9 +106,11 @@ instance PrettyPrintable TemporalTerminal
     DeltaT -> toDoc "h"
     PreviousDerivative i -> PrettyPrint.hcat $ toDoc <$> ["f(n-", show i, ")"]
 
+
+-- | A fully discretised problem
 data Discretised = Discretised
-  { _discretisedLiterals :: Map String Rational
-  , _discretisedMeshes :: [Mesh]
+  { _discretisedLiterals :: Map String Rational -- ^ Literal definitions
+  , _discretisedMeshes :: [Mesh] -- ^ List of Meshes defined
   } deriving Show
 
 instance PrettyPrintable Discretised
@@ -116,14 +123,15 @@ instance PrettyPrintable Discretised
     literalEntries = transformEntry <$> Map.assocs (_discretisedLiterals discrete)
     transformEntry (name, value) = (show name, toDoc value)
 
+-- | Definition of a mesh
 data Mesh = Mesh
   { _meshName :: String
-  , _meshDimension :: Integer
-  , _meshFields :: [Field]
-  , _meshSolves :: [Solve]
-  , _meshGridSpacing :: [Expression DiscreteTerminal]
-  , _meshDimensions :: [Expression DiscreteTerminal]
-  , _meshInitialValues :: [(String, Tensor (Expression Terminal))]
+  , _meshDimension :: Integer -- ^ Name
+  , _meshFields :: [Field] -- ^ Fields defined over the mesh
+  , _meshSolves :: [Solve] -- ^ List of solves used to update the mesh
+  , _meshGridSpacing :: [Expression DiscreteTerminal] -- ^ Expressions for grid spacing in each dimension
+  , _meshDimensions :: [Expression DiscreteTerminal] -- ^ Expressions for number of points in each dimension
+  , _meshInitialValues :: [(String, Tensor (Expression Terminal))] -- ^ Initial values for fields, specified by name
   } deriving Show
 
 instance PrettyPrintable Mesh
@@ -138,13 +146,14 @@ instance PrettyPrintable Mesh
     , ("initial", structureDoc "Map" $ (\(a,b) -> (a, toDoc b)) <$> _meshInitialValues mesh)
     ]
 
+-- | Definition of a field
 data Field = Field
-  { _fieldName :: String
-  , _fieldRank :: Integer
-  , _fieldSymmetric :: Bool
-  , _fieldInitial :: Tensor (Expression Terminal)
-  , _fieldStaggerSpatial :: [[Bool]]
-  , _fieldStaggerTemporal :: Bool
+  { _fieldName :: String -- ^ Name
+  , _fieldRank :: Integer -- ^ Tensor-rank
+  , _fieldSymmetric :: Bool -- ^ Whether field is symmetric (unused)
+  , _fieldInitial :: Tensor (Expression Terminal) -- ^ Initial expression for the field
+  , _fieldStaggerSpatial :: [[Bool]] -- ^ For each tensor element, whether value is staggered in each dimension
+  , _fieldStaggerTemporal :: Bool -- ^ Temporal staggering (unused)
 } deriving Show
 
 instance PrettyPrintable Field
@@ -155,16 +164,17 @@ instance PrettyPrintable Field
     , ("symmetric", toDoc $ _fieldSymmetric field)
     , ("initial", toDoc $ _fieldInitial field)
     , ("spatial_staggering", hListDoc $ hListDoc <$> _fieldStaggerSpatial field)
-    , ("temporal_staggering", toDoc $ _fieldStaggerTemporal field)
+    , ("temporal_staggering", toDoc$ _fieldStaggerTemporal field)
     ]
 
+-- ! Definition of a solve
 data Solve = Solve
-  { _solveName :: String
-  , _solveSpatialOrder :: Integer
-  , _solveTemporalOrder :: Integer
-  , _solveUpdates :: [Update]
-  , _solveBoundaryConditions :: [BoundaryCondition]
-  , _solveDeltaT :: Expression DiscreteTerminal
+  { _solveName :: String -- ^ Name
+  , _solveSpatialOrder :: Integer -- ^ Order of spatial accuracy
+  , _solveTemporalOrder :: Integer -- ^ Order of temporal accuracy
+  , _solveUpdates :: [Update] -- ^ List of field updates
+  , _solveBoundaryConditions :: [BoundaryCondition] -- ^ List of boundary conditions
+  , _solveDeltaT :: Expression DiscreteTerminal -- ^ Expression for time-step size
 } deriving Show
 
 instance PrettyPrintable Solve
@@ -178,11 +188,14 @@ instance PrettyPrintable Solve
     , ("delta_t", toDoc $ _solveDeltaT solve)
     ]
 
+-- | Types of boundary condition
 data BoundaryConditionType
   = Dirichlet
   | Neumann
   deriving (Eq, Ord, Show)
 
+
+-- | Represents edge domains. Currently either all exterior edges of the mesh or a string used to identify named edges.
 data EdgeDomain
   = AllExteriorEdges
   | TaggedEdgeString String
@@ -198,8 +211,10 @@ instance PrettyPrintable BoundaryConditionType
     Dirichlet -> "Dirichlet"
     Neumann -> "Neumann"
 
+
+-- | The left-hand side of a field assignment
 data FieldLValue
-  = FieldLValue String [Integer]
+  = FieldLValue String [Integer] -- ^ The field at the specified index
   deriving (Eq, Ord, Show)
 
 instance PrettyPrintable FieldLValue
@@ -208,8 +223,9 @@ instance PrettyPrintable FieldLValue
    [] -> toDoc name
    _ -> PrettyPrint.hcat [toDoc name, hListDoc indices]
 
+-- | The left hand side of a time-stepping assignment
 data FieldTemporalDerivative
-  = FieldTemporalDerivative FieldLValue Integer
+  = FieldTemporalDerivative FieldLValue Integer -- ^ The nth temporal derivative of an l-value
   deriving (Eq, Ord, Show)
 
 instance PrettyPrintable FieldTemporalDerivative
@@ -218,6 +234,7 @@ instance PrettyPrintable FieldTemporalDerivative
     then PrettyPrint.hcat [toDoc "(d^", toDoc i, toDoc " * ", toDoc f, toDoc ")/dt^", toDoc i]
     else toDoc f
 
+-- | Used to determine the underlying field and tensor-index of an assignment
 class ContainsLValue e where
   getLValue :: e -> FieldLValue
 
@@ -229,11 +246,12 @@ instance ContainsLValue Update
   where
   getLValue = getLValue . _updateLHS
 
+-- | A field update
 data Update = Update
-  { _updateLHS :: FieldTemporalDerivative
-  , _updateRHS :: Tensor (Expression Terminal)
-  , _updateRHSDiscrete :: Tensor (Expression DiscreteTerminal)
-  , _updateTimeSteppingSchemes :: Map Integer (Expression TemporalTerminal)
+  { _updateLHS :: FieldTemporalDerivative -- ^ The temporal derivative being defined (currently always first derivative, but could be 0 for interpolation)
+  , _updateRHS :: Tensor (Expression Terminal) -- ^ The non-discretised right-hand side expression
+  , _updateRHSDiscrete :: Tensor (Expression DiscreteTerminal) -- ^ The discretised right-hand side expression
+  , _updateTimeSteppingSchemes :: Map Integer (Expression TemporalTerminal) -- ^ Contains multiple time-stepping schemes for spin-up
   } deriving Show
 
 instance PrettyPrintable Update
@@ -249,12 +267,13 @@ instance PrettyPrintable Update
     schemeEntries = transformEntry <$> Map.assocs (_updateTimeSteppingSchemes update)
     transformEntry (order, expr) = (show order, toDoc expr)
 
+-- | Defines a boundary condition
 data BoundaryCondition = BoundaryCondition
-  { _bcType :: BoundaryConditionType
-  , _bcField :: FieldLValue
-  , _bcRHS :: Tensor (Expression Terminal)
-  , _bcRHSDiscrete :: Tensor (Expression DiscreteTerminal)
-  , _bcSubdomains :: [EdgeDomain]
+  { _bcType :: BoundaryConditionType -- ^ The type of boundary condition
+  , _bcField :: FieldLValue -- ^ The field element the condition is applied to
+  , _bcRHS :: Tensor (Expression Terminal) -- ^ Continuous expression for right-hand side
+  , _bcRHSDiscrete :: Tensor (Expression DiscreteTerminal) -- ^ Discrete expression for right-hand side
+  , _bcSubdomains :: [EdgeDomain] -- ^ The edge domains the condition is applied to
   } deriving Show
 
 instance PrettyPrintable BoundaryCondition
@@ -267,6 +286,7 @@ instance PrettyPrintable BoundaryCondition
     , ("subdomains", vListDoc $ _bcSubdomains bc)
     ]
 
+-- | Is the supplied expression constant over the mesh?
 isMeshConstant :: Expression DiscreteTerminal -> Bool
 isMeshConstant expr = foldl (&&) True (isConstantSymbol <$> unknowns)
   where
@@ -276,6 +296,8 @@ isMeshConstant expr = foldl (&&) True (isConstantSymbol <$> unknowns)
     ConstantDataRef _ _ -> True
     DiscreteDirection _ -> False
 
+
+-- | Converts a parsed FDFL file to the dicretised representation
 buildDiscreteForm :: Parser.FDFL -> Discretised
 buildDiscreteForm fdfl = discretisedNoMeshes
   { _discretisedMeshes = meshes'
@@ -293,6 +315,7 @@ buildDiscreteForm fdfl = discretisedNoMeshes
   maybeBuildLiteral _ = Nothing
   literals = Map.fromList . catMaybes $ maybeBuildLiteral <$> Map.elems (Parser.getSymbols fdfl)
 
+-- | Given mesh containing continuous expressions, populates it with discretised expressions
 doSpatialDiscretisation :: Mesh -> Mesh
 doSpatialDiscretisation = updateMesh
   where
@@ -306,6 +329,7 @@ doSpatialDiscretisation = updateMesh
   updateUpdate mesh solve update = update { _updateRHSDiscrete = buildRHSDiscrete mesh solve update }
   updateBoundaryCondition _mesh _solve bc = bc { _bcRHSDiscrete = discretiseMeshConstantExpr <$> _bcRHS bc }
 
+-- | Replaces constant references with actual values in both discrete and continuous expressions
 constantFoldDiscretised :: Discretised -> Discretised
 constantFoldDiscretised d = d
   { _discretisedMeshes = updateMesh <$> _discretisedMeshes d
@@ -344,6 +368,8 @@ constantFoldDiscretised d = d
       Nothing -> Symbol s
     mappedSymbols = Map.mapKeys constructor values
 
+
+-- | Converts tensor-valued fields to scalar-valued ones and updates all expressions to match.
 scalarizeTensorFields :: Mesh -> Mesh
 scalarizeTensorFields m = updateMesh m
   where
@@ -416,11 +442,13 @@ scalarizeTensorFields m = updateMesh m
       rhsIndex = genericDrop (rank - rhsRank) index
       rhsValue = Tensor.getElement (_bcRHS bc) rhsIndex
 
+-- | Build a dictionary used for string templating
 buildTemplateDictionary :: Discretised -> Template.Dict
 buildTemplateDictionary discretised = Template.insert "meshes" (Template.ListVal $ Template.DictVal <$> meshes) Template.emptyDict
   where
   meshes = buildMeshDictionary discretised <$> _discretisedMeshes discretised
 
+-- | Build a dictionary containing mesh-related values
 buildMeshDictionary :: Discretised -> Mesh -> Template.Dict
 buildMeshDictionary discretised mesh = Map.fromList
   [ ("name", Template.StringVal $ _meshName mesh)
@@ -428,6 +456,7 @@ buildMeshDictionary discretised mesh = Map.fromList
   , ("fields", Template.ListVal $ Template.DictVal . buildFieldDictionary discretised mesh <$> _meshFields mesh)
   ]
 
+-- | Build a dictionary containing field-related values
 buildFieldDictionary :: Discretised -> Mesh -> Field -> Template.Dict
 buildFieldDictionary _ mesh field = Map.fromList
   [ ("name", Template.StringVal $ _fieldName field)
@@ -436,6 +465,7 @@ buildFieldDictionary _ mesh field = Map.fromList
   where
   num_components = (_meshDimension mesh) ^ (_fieldRank field)
 
+-- | Convert a parsed mesh to the discretised representation
 buildMesh :: Discretised -> Parser.FDFL -> Parser.Mesh -> Mesh
 buildMesh _ fdfl parserMesh = mesh
   where
@@ -474,12 +504,14 @@ buildMesh _ fdfl parserMesh = mesh
       True -> expr
       False -> error $ "Expression is not constant across grid: " ++ show expr
 
+-- | Convert a parsed literal to a name-value pair
 buildLiteral :: Parser.FDFL -> Parser.NamedLiteral -> (String, Rational)
 buildLiteral _fdfl namedLiteral = (name, value)
   where
   name = Parser.stringLiteralValue $ Parser._namedLiteralName namedLiteral
   value = Parser._namedLiteralValue namedLiteral
 
+-- | Convert a parsed field to the discretised representation
 buildField :: Mesh -> Parser.FDFL -> Parser.Field -> Field
 buildField mesh fdfl field = Field
   { _fieldName = name
@@ -507,30 +539,35 @@ buildField mesh fdfl field = Field
       1 -> [genericReplicate n True ++ [False] ++ genericReplicate (dimension-1-n) True | n <- [0..dimension-1]]
       _ -> error $ "InverseDimension staggering strategy is only defined for rank 1 tensors (" ++ name ++ ")."
 
+-- | Convert a parsed initial-value specification to the discretised representation
 buildInitialValue :: Mesh -> Parser.FDFL -> (Parser.StringLiteral, Parser.FieldExpr Parser.Identifier) -> (String, Tensor (Expression Terminal))
 buildInitialValue mesh fdfl (pName, pExpr) = (fieldName, fieldExpr)
   where
   fieldName = Parser.stringLiteralValue pName
   fieldExpr = buildTensorRValue mesh fdfl pExpr
 
+-- | Retrives the specified field definition from a mesh
 meshGetField :: Mesh -> String -> Field
 meshGetField mesh name = case filter (\f -> _fieldName f == name) (_meshFields mesh) of
   [] -> error $ "Unknown field " ++ name
   [f] -> f
   _ -> error $ "Multiple definitions of " ++ name
 
+-- | Retrives the specified field initial value expression from the mesh (if present)
 meshGetInitialValue :: Mesh -> String -> Maybe (Tensor (Expression Terminal))
 meshGetInitialValue mesh fieldName =
   case filter (\(name, _) -> fieldName == name) (_meshInitialValues mesh) of
     ((_, expr):_) -> Just expr
     [] -> Just . _fieldInitial $ meshGetField mesh fieldName
 
+-- | Discretise a continuous expression that is independent of mesh position
 discretiseMeshConstantExpr :: Expression Terminal -> Expression DiscreteTerminal
 discretiseMeshConstantExpr = substSymbols makeDiscreteConstant
   where
   makeDiscreteConstant (ConstantRef name idx) = ConstantDataRef name idx
   makeDiscreteConstant sym = error $ "Unable to convert symbol " ++ show sym ++ " to mesh cell-independent value"
 
+-- | Convert parsed boundary condition to discrete representation
 buildBoundaryCondition :: Mesh -> Parser.FDFL -> Parser.Solve -> Parser.BoundaryCondition -> BoundaryCondition
 buildBoundaryCondition mesh fdfl _solve bc = BoundaryCondition
   { _bcType = bcType
@@ -547,6 +584,7 @@ buildBoundaryCondition mesh fdfl _solve bc = BoundaryCondition
     Nothing -> [AllExteriorEdges]
     Just domains -> (TaggedEdgeString . Parser.stringLiteralValue) <$> domains
 
+-- | Convert parsed solve to discrete representation
 buildSolve :: Mesh -> Parser.FDFL -> Parser.Solve -> Solve
 buildSolve mesh fdfl solve = Solve
   { _solveName = Parser.stringLiteralValue $ Parser._solveName solve
@@ -566,11 +604,13 @@ buildSolve mesh fdfl solve = Solve
     _ -> error $ "buildSolve: unknown boundary condition " ++ Parser.identifierValue ident
   buildDeltaT = discretiseMeshConstantExpr <$> Tensor.asScalar . buildTensorRValue mesh fdfl $ Parser._solveDeltaT solve
 
+-- | Generate an Adams-Bashforth integration scheme. The first parameter specifies the order of the
+-- derivatives being used (usually 1 for dt) and the number of previous time-steps to use.
 buildAdamsBashForth :: Integer -> Integer -> Expression TemporalTerminal
 buildAdamsBashForth numDerivatives order =
   adamsBashforthGeneral numDerivatives DeltaT (Symbol PreviousValue) $ (Symbol . PreviousDerivative) <$> [0 .. order - 1]
 
--- Transform derivatives to new terminals that know about them and eliminate function representations.
+-- | Transform derivatives to new terminals that know about them and eliminate function representations.
 makeSemiDiscrete :: Integer -> Expression Terminal -> Expression SemiDiscreteTerminal
 makeSemiDiscrete dimension expr = rewritten''
   where
@@ -591,6 +631,7 @@ makeSemiDiscrete dimension expr = rewritten''
     Application (ApplyUserDefined sym@(SemiDiscreteFieldRef _ _ _) _) -> Symbol sym
     _ -> e
 
+-- | Build the discrete RHS expression for a field update
 buildRHSDiscrete :: Mesh -> Solve ->
                     Update -> Tensor(Expression DiscreteTerminal)
 buildRHSDiscrete mesh solve update = rhs
@@ -633,6 +674,7 @@ buildRHSDiscrete mesh solve update = rhs
           where
           staggerOffset = if genericIndex lhsStaggering i then 0.5 else 0.0
 
+-- | Given two staggerings, compute the relative staggering between them.
 computeStaggering :: [Bool] -> [Bool] -> [Stagger]
 computeStaggering first second = case (length first == length second) of
   False -> error "computeStaggering: mismatch between length of staggering arrays"
@@ -643,9 +685,11 @@ computeStaggering first second = case (length first == length second) of
     (True, False) -> StaggerNeg
     _ -> StaggerNone
 
+-- | Builds a vector of functions that calculate the first derivative in each dimension
 genNabla :: Integer -> Tensor (Expression Terminal -> Expression Terminal)
 genNabla dim = Tensor.constructTensor dim 1 [diff $ Direction dir | dir <- [0 .. dim-1]]
 
+-- | Transforms a parsed field expression to a continuous expression (mainly unfolding tensor operations).
 buildTensorRValue :: Mesh -> Parser.FDFL -> Parser.FieldExpr Parser.Identifier -> Tensor (Expression Terminal)
 buildTensorRValue mesh fdfl expr = case expr of
   Parser.FieldTemporalDerivative _ -> error "buildUpdate: Temporal derivative not expected in RHS"
@@ -713,6 +757,7 @@ buildTensorRValue mesh fdfl expr = case expr of
     gen idx = constructor (Parser.stringLiteralValue name) idx
   directions = Symbol . Direction <$> [0 .. dimension -1]
 
+-- | Finds the l-value of a parsed field update
 findLValue :: Mesh -> Parser.FDFL -> Parser.FieldExpr Parser.Identifier -> FieldLValue
 findLValue mesh fdfl expr = case expr of
   Parser.FieldRef ident -> FieldLValue (getFieldName ident) []
@@ -724,12 +769,16 @@ findLValue mesh fdfl expr = case expr of
   getFieldName = Parser.stringLiteralValue . Parser._fieldName . Parser.getFieldDef fdfl
   getFieldRank = _fieldRank . meshGetField mesh . getFieldName
 
+-- | Find the largest order time-step update
 maxTimestepOrder :: Update -> Integer
 maxTimestepOrder update = Map.foldrWithKey (\k _ b -> max k b) 0 (_updateTimeSteppingSchemes update)
 
+-- | Retrive the time-stepping scheme of the specified order
 getTimestepping :: Update -> Integer -> Maybe (Expression TemporalTerminal)
 getTimestepping update order = Map.lookup order (_updateTimeSteppingSchemes update)
 
+
+-- | Returns the number of previous time-steps needed for an update of the given order
 numPreviousTimestepsNeeded :: Update -> Integer -> Integer
 numPreviousTimestepsNeeded update order = foldl max 0 unknownsDerivatives
   where
@@ -741,6 +790,7 @@ numPreviousTimestepsNeeded update order = foldl max 0 unknownsDerivatives
     PreviousDerivative n -> Just n
     _ -> Nothing
 
+-- | Find the update for a given field in a solve
 findFieldUpdate :: FieldLValue -> Solve -> Maybe Update
 findFieldUpdate lhs solve = case matchingUpdates of
   [update] -> Just update
@@ -750,6 +800,7 @@ findFieldUpdate lhs solve = case matchingUpdates of
   updates = _solveUpdates solve
   matchingUpdates = filter (\u -> getLValue u == lhs) updates
 
+-- | Builds a representation of an update from the parsed form
 buildUpdate :: Mesh -> Parser.FDFL -> Parser.Solve -> Parser.Equation -> Update
 buildUpdate mesh fdfl solve equ = Update
   { _updateLHS = lhs
@@ -768,9 +819,11 @@ buildUpdate mesh fdfl solve equ = Update
     buildDerivative n (Parser.FieldTemporalDerivative subExpr) = buildDerivative (n + 1) subExpr
     buildDerivative n lValue = FieldTemporalDerivative (findLValue mesh fdfl lValue) n
 
+-- | Merge together maps containing ghost point counts
 mergeBoundingMap :: Map FieldLValue [(Integer, Integer)] -> Map FieldLValue [(Integer, Integer)] -> Map FieldLValue [(Integer, Integer)]
 mergeBoundingMap a b = foldr (uncurry $ Map.insertWith mergeBoundingRange) a (Map.toList b)
 
+-- | Find number of ghost points needed for given expression
 expressionGetGhostSizes :: Expression DiscreteTerminal -> Map FieldLValue [(Integer, Integer)]
 expressionGetGhostSizes expr = result
   where
@@ -783,11 +836,13 @@ expressionGetGhostSizes expr = result
     DiscreteDirection _ -> Nothing
   makeRange i = (i, i)
 
+-- | Determine the number of ghost points needed on each side of an update
 updateGetGhostSizes :: Update -> Map FieldLValue [(Integer, Integer)]
 updateGetGhostSizes update = foldr mergeBoundingMap Map.empty (expressionGetGhostSizes <$> tensorEntries)
   where
   rhs = _updateRHSDiscrete update
   tensorEntries = Tensor.getEntries rhs
 
+-- | Determine the number of ghost points needed on each side of a solve
 solveGetGhostSizes :: Solve -> Map FieldLValue [(Integer, Integer)]
 solveGetGhostSizes solve = foldr mergeBoundingMap Map.empty (updateGetGhostSizes <$> _solveUpdates solve)
