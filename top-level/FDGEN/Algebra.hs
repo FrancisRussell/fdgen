@@ -21,11 +21,13 @@ import qualified Control.Lens as Lens
 data SumTag
 data ProdTag
 
+-- | Special constants
 data Special
   = Euler
   | Pi
   deriving (Eq, Ord, Show)
 
+-- | Built in unary functions
 data UnaryFunction
   = Cos
   | Sin
@@ -35,12 +37,13 @@ data UnaryFunction
   | Ln
   deriving (Eq, Ord, Show)
 
+-- | Built in binary functions (excluding those naturally expressed by a PairSeq)
 data BinaryFunction
   = Power
   deriving (Eq, Ord, Show)
 
 class ContainsFunction e where
-  functionName :: e -> String
+  functionName :: e -> String -- ^ Return the name of a contained function
 
 instance ContainsFunction UnaryFunction where
   functionName f = case f of
@@ -61,66 +64,76 @@ instance PrettyPrintable e => ContainsFunction (FunctionApplication e) where
     ApplyBinary fn _ _ -> functionName fn
     ApplyUserDefined sym _ -> prettyPrint sym
 
+-- | Wrapper type for different types of function application
 data FunctionApplication e
-  = ApplyUnary UnaryFunction (Expression e)
-  | ApplyBinary BinaryFunction (Expression e) (Expression e)
-  | ApplyUserDefined e [Expression e]
+  = ApplyUnary UnaryFunction (Expression e) -- ^ Application of built-in unary function
+  | ApplyBinary BinaryFunction (Expression e) (Expression e) -- ^ Application of built-in binary function
+  | ApplyUserDefined e [Expression e] -- ^ Application of user-defined function to arbitrary number of parameters
   deriving (Eq, Ord, Show)
 
+-- | Returns the list of all parameters to a function application
 functionParams :: FunctionApplication e -> [Expression e]
 functionParams a = case a of
   ApplyUnary _ e0 -> [e0]
   ApplyBinary _ e0 e1 -> [e0, e1]
   ApplyUserDefined _ params -> params
 
+-- | Converts a special value to its floating point equivalent
 fromSpecial :: (Floating a) => Special -> a
 fromSpecial s = case s of
   Euler -> exp 1
   Pi -> pi
 
+-- | A general expression type
 data Expression e
-  = Symbol e
-  | Sum (PairSeq SumTag e)
-  | Product (PairSeq ProdTag e)
-  | ConstantFloat Double
-  | ConstantRational Rational
-  | Diff (Expression e) e Integer
-  | Int (Expression e) e
-  | Application (FunctionApplication e)
-  | ConstantSpecial Special
+  = Symbol e -- ^ A symbol of user-defined type
+  | Sum (PairSeq SumTag e) -- ^ A sum of terms multiplied by rational co-efficients plus a constant
+  | Product (PairSeq ProdTag e) -- ^ A product of terms raised to rationals multiplied by a constant
+  | ConstantFloat Double -- ^ A constant floating-point value
+  | ConstantRational Rational -- ^ A constant rational value
+  | Diff (Expression e) e Integer -- ^ The nth derivative on an expression w.r.t the specified symbol
+  | Int (Expression e) e -- ^ The integral of the expression w.r.t. the specified symbol
+  | Application (FunctionApplication e) -- ^ A function application
+  | ConstantSpecial Special -- ^ A special constant
   deriving (Show, Eq, Ord)
 
+-- | The re-write state of an expression
 data RewriteState
-  = NonNormal
-  | Normal
-  | NormalAndExtracted
+  = NonNormal -- ^ The expression has not been simplified
+  | Normal -- ^ The expression has been simplified but may contain a top-level multiplier
+  | NormalAndExtracted -- ^ The expression has been simplified and the top-level multiplier is one
   deriving (Eq, Ord, Show)
 
+-- | A general representation for summation and products
 data PairSeq t e = PairSeq {
-  _psOverall :: Rational,
-  _psTerms :: Map (Expression e) Rational,
-  _psRewriteState :: RewriteState
+  _psOverall :: Rational, -- For products a top-level multiplier, for sums a top-level additive value
+  _psTerms :: Map (Expression e) Rational, -- A map of expressions to a multiplier for sums, or power for products
+  _psRewriteState :: RewriteState -- The simplification state of the PairSeq
 } deriving (Eq, Ord, Show)
 
 Lens.makeLenses ''PairSeq
 
+-- | A type-class for operations defined on both sums and products
 class PairSeqLike t e where
-  empty :: PairSeq t e
-  extractMultipliers :: Ord e => PairSeq t e -> PairSeq t e
-  wrap :: PairSeq t e -> Expression e
-  addTerm :: Ord e => Expression e -> Rational -> PairSeq t e -> PairSeq t e
+  empty :: PairSeq t e -- ^ Constructs a null expression (0 for sums, 1 for products)
+  extractMultipliers :: Ord e => PairSeq t e -> PairSeq t e -- ^ Simplifies sub-terms, extracts their top-level multipliers and integrates them into the PairSeq
+  wrap :: PairSeq t e -> Expression e -- ^ Converts a PairSeq back into an expression
+  addTerm :: Ord e => Expression e -> Rational -> PairSeq t e -> PairSeq t e -- Adds a term to the map
 
+-- | Is the PairSeq simplified?
 isNormalised :: PairSeq t e -> Bool
 isNormalised seq' = case _psRewriteState seq' of
   Normal -> True
   NormalAndExtracted -> True
   _ -> False
 
+-- | Simplifies a PairSeq
 normalise :: (PairSeqLike t e, Ord e) => PairSeq t e -> PairSeq t e
 normalise seq' = if isNormalised seq'
   then seq'
   else Lens.set psRewriteState Normal . removeZeros $ extractMultipliers seq'
 
+-- | Given an expression, extracts a top-level multiplier and a rewritten expression e.g. 3x^2 -> (3, x^2)
 extractMultiplier :: forall e . Ord e => Expression e -> (Rational, Expression e)
 extractMultiplier (Product seq') = case _psRewriteState seq' of
   NormalAndExtracted -> (1, simplifyPairSeq seq')
@@ -209,9 +222,11 @@ instance PairSeqLike ProdTag e where
         _ -> normalInsert
       else normalInsert
 
+-- | Incremnts a term within a PairSeq (utility function for addTerm)
 incrementTerm :: Ord e => Expression e -> Rational -> PairSeq t e -> PairSeq t e
 incrementTerm expr coeff = Lens.over psTerms $ Map.insertWith (+) expr coeff
 
+-- | Converts a PairSeq to a list of expression and associated rational multipler or power.
 toPairs :: PairSeqLike t e => PairSeq t e -> [(Expression e, Rational)]
 toPairs seq' = if hasNullOverall seq'
   then terms
@@ -220,30 +235,40 @@ toPairs seq' = if hasNullOverall seq'
   overall = (ConstantRational $ _psOverall seq', 1)
   terms = Map.assocs $ _psTerms seq'
 
+-- | Converts a list of expressions and associated values back to a PairSeq
 fromPairs :: (Ord e, PairSeqLike t e) => [(Expression e, Rational)] -> PairSeq t e
 fromPairs = foldl' (flip $ uncurry addTerm) empty
 
+-- | Removes all terms whose associated co-efficient is zero from a PairSeq
 removeZeros :: PairSeq t e -> PairSeq t e
 removeZeros = Lens.over psTerms $ Map.filter (/= 0)
 
+-- | Adds two expressions (without simplifying)
 add :: Ord e => Expression e -> Expression e -> Expression e
 add a b = Sum $ fromPairs [(a, 1), (b, 1)]
 
+-- | Subtract two expressions (without simplifying)
 sub :: Ord e => Expression e -> Expression e -> Expression e
 sub a b = Sum $ fromPairs [(a, 1), (b, -1)]
 
+-- | Multiply two expressions (without simplifying)
 mul :: Ord e => Expression e -> Expression e -> Expression e
 mul a b = Product $ fromPairs [(a, 1), (b, 1)]
 
+-- | Divide two expressions (without simplifying)
 divide :: Ord e => Expression e -> Expression e -> Expression e
 divide a b = Product $ fromPairs [(a, 1), (b, -1)]
 
+-- | Raise expression to a rational value (without simplifying)
 raise :: Ord e => Expression e -> Rational -> Expression e
 raise a b = Product $ fromPairs [(a, b)]
 
+-- | Returns true if the overall coefficient for a PairSeq is the default value.
+-- This is 0 for sums and 1 for products.
 hasNullOverall :: forall t e . PairSeqLike t e => PairSeq t e -> Bool
 hasNullOverall seq' = _psOverall seq' == _psOverall (empty :: PairSeq t e)
 
+-- | Simplifies a PairSeq
 simplifyPairSeq :: (PairSeqLike t e, Ord e) => PairSeq t e -> Expression e
 simplifyPairSeq seq' = newExpr
   where
@@ -255,6 +280,7 @@ simplifyPairSeq seq' = newExpr
       else wrap normalised
     _ -> wrap normalised
 
+-- | Simplifies an expression as much as possible
 simplify :: Ord e => Expression e -> Expression e
 simplify (Product seq') = simplify' $ simplifyPairSeq seq'
 simplify (Sum seq') = simplify' $ simplifyPairSeq seq'
@@ -263,6 +289,7 @@ simplify (Application (ApplyUnary Signum e)) = simplify' . Application . ApplyUn
 simplify (Application (ApplyBinary Power a b)) = simplify' . Application $ ApplyBinary Power (simplify a) (simplify b)
 simplify e = simplify' e
 
+-- | Simplifies expressions using a rewrite rules at the top level
 simplify' :: Ord e => Expression e -> Expression e
 simplify' (Application (ApplyUnary Abs (ConstantRational r))) = ConstantRational $ abs r
 simplify' (Application (ApplyUnary Abs (ConstantFloat f))) = ConstantFloat $ abs f
@@ -276,14 +303,17 @@ simplify' expr@(Product seq') = case _psOverall seq' of
 simplify' (Application (ApplyBinary Power f (ConstantRational g))) = simplify $ raise f g
 simplify' e = e
 
+-- | Applies a rewrite function to an expression and its sub-expressions
 rewrite :: Ord e => (Expression e -> Expression e) -> Expression e -> Expression e
 rewrite f = simplify' . f . rewrite' f
 
+-- | Applies a rewrite to the sub-expressions of a PairSeq
 rewritePairSeq :: (Ord e, PairSeqLike t e) => (Expression e -> Expression e) -> PairSeq t e -> PairSeq t e
 rewritePairSeq f = foldl' addTerm' empty . toPairs
   where
   addTerm' s (e, r) = addTerm (rewrite f e) r s
 
+-- | Helper functions for rewrite
 rewrite' :: Ord e => (Expression e -> Expression e) -> Expression e -> Expression e
 rewrite' f (Sum seq') = simplifyPairSeq $ rewritePairSeq f seq'
 rewrite' f (Product seq') = simplifyPairSeq $ rewritePairSeq f seq'
@@ -298,19 +328,23 @@ rewrite' _ e@(ConstantFloat _) = e
 rewrite' _ e@(ConstantRational _) = e
 rewrite' _ s@(ConstantSpecial _) = s
 
+-- | Helper function used to rewrite a symbol using a general expression rewrite function
 rewriteSymbol :: (Expression e -> Expression f) -> e -> f
 rewriteSymbol f sym = case f (Symbol sym) of
   Symbol s -> s
   _ -> error "rewriteSymbol: cannot subsitute variable with complex expression"
 
+-- | Replaces an expression with a new one within the supplied expression
 subst :: Ord e => Expression e -> Expression e -> Expression e -> Expression e
 subst from to = simplify . rewrite update
   where
   update e' = if e' == from then to else e'
 
+-- | Uses the supplied function to rewrite symbols within an expression
 substSymbols :: (Ord e, Ord f) => (e -> f) -> Expression e -> Expression f
 substSymbols f = expandSymbols (Symbol . f)
 
+-- | Uses the supplied function to expand symbools to an expression
 expandSymbols :: (Ord e, Ord f) => (e -> Expression f) -> Expression e -> Expression f
 expandSymbols f expr = simplify $ case expr of
   Symbol s -> f s
@@ -331,6 +365,7 @@ expandSymbols f expr = simplify $ case expr of
     Symbol s -> s
     _ -> error "expandSymbols: cannot substitute variable with complex expression"
 
+-- | Constructs a 1D Lagrange interpolation though the specified (x, val) pairs
 lagrange :: Ord e => Expression e -> [(Expression e, Expression e)] -> Expression e
 lagrange sym points = foldl' (+) 0 bases
   where
@@ -343,6 +378,7 @@ lagrange sym points = foldl' (+) 0 bases
       where
       (xk, _) = points !! k
 
+-- | Returns true if the expression depends on any symbol in the supplied set
 depends :: Ord e => Set e -> Expression e -> Bool
 depends syms (Symbol s) = Set.member s syms
 depends syms (Sum seq') =
@@ -359,6 +395,7 @@ depends syms (Application a) = case a of
   ApplyBinary _ e0 e1 -> depends syms e0 || depends syms e1
   ApplyUserDefined sym params -> foldl (||) (Set.member sym syms) (depends syms <$> params)
 
+-- | Returns all symbols this expression requires for evaluation
 vars :: Ord e => Expression e -> Set e
 vars (Symbol s) = Set.singleton s
 vars (Sum seq') =
@@ -375,9 +412,13 @@ vars (Application a) = case a of
   ApplyBinary _ e0 e1 -> Set.union (vars e0) (vars e1)
   ApplyUserDefined sym params -> foldl Set.union (Set.singleton sym) (vars <$> params)
 
+-- | Given an expression, symbol and power, attempts to determine a coefficient expression.
+-- e.g. polyCoeff (ax^2 + bx + 5) x 1 == b
 polyCoeff :: Ord e => Expression e -> e -> Int -> Maybe (Expression e)
 polyCoeff expr sym power = (!! power) <$> (++ repeat 0) <$> polyCoeffs expr sym
 
+-- | Given an expression and a symbol, determines a co-efficient for each power of that symbol
+-- e.g PolyCoeffs (ax^2 + bx + 5) x -> [5, b, a]
 polyCoeffs :: Ord e => Expression e -> e -> Maybe [Expression e]
 polyCoeffs expr sym = if depends (Set.singleton sym) expr
   then polyCoeffs' expr
@@ -421,15 +462,19 @@ polyCoeffs expr sym = if depends (Set.singleton sym) expr
   polyCoeffs' (Int _expr _sym) = Nothing
   polyCoeffs' (Application _) = Nothing
 
+-- | Extracts an element from a list at the specified index and returns the
+-- element and the list with that element removed.
 extractElem :: [a] -> Int -> (a, [a])
 extractElem lst index = (elem', rest)
   where
   (header, elem' : footer) = splitAt index lst
   rest = header ++ footer
 
+-- | Calculates the derivative of an expression w.r.t. the specified symbol
 diff :: Ord e => e -> Expression e -> Expression e
 diff sym = simplify . diff' sym
 
+-- | Helper function for diff
 diff' :: Ord e => e -> Expression e -> Expression e
 diff' sym expression = case expression of
   ConstantFloat _ -> 0
@@ -467,6 +512,8 @@ diff' sym expression = case expression of
     then Diff expression sym 1
     else 0
 
+-- | Given a PairSeq, split into two lists of expression-rational pairs.
+-- The first depends on the given symbol, the second does not.
 splitPairSeqDepends :: (PairSeqLike t e, Ord e) => Set e -> PairSeq t e -> ([(Expression e, Rational)], [(Expression e, Rational)])
 splitPairSeqDepends syms seq' = foldl' combine ([], []) $ toPairs seq'
   where
@@ -476,19 +523,23 @@ splitPairSeqDepends syms seq' = foldl' combine ([], []) $ toPairs seq'
     where
     addTerm' terms = (expr, coeff):terms
 
+-- | Calculates the definite integral of an expression at the specified limits
 definiteIntegrate :: Ord e => e -> Expression e -> Expression e -> Expression e -> Expression e
 definiteIntegrate sym low high =
   differenceAtLimits sym low high . integrate sym
 
+-- | Calculates the difference between two expressions at the specified limits
 differenceAtLimits :: Ord e => e -> Expression e -> Expression e -> Expression e -> Expression e
 differenceAtLimits sym low high expr =
   expand $ (exprAt high) - (exprAt low)
   where
   exprAt pos = subst (Symbol sym) pos expr
 
+-- | Calculates an indefinite integral (but does not add a c term)
 integrate :: Ord e => e -> Expression e -> Expression e
 integrate sym = simplify . integrate' sym . expand
 
+-- | Helper function for integrate
 integrate' :: Ord e => e -> Expression e -> Expression e
 integrate' sym expr = case expr of
   Application (ApplyUnary Abs _) -> integrateByParts sym expr 1
@@ -515,6 +566,7 @@ integrate' sym expr = case expr of
     then Int expr sym
     else Symbol sym * expr
 
+-- | Helper function to integrate a list of terms raised to rationals
 integrateProductSeq :: Ord e => e -> [(Expression e, Rational)] -> Expression e
 integrateProductSeq sym [] = Symbol sym
 integrateProductSeq sym [(expr, exp')]
@@ -537,6 +589,8 @@ integrateProductSeq sym pairs = integrateByParts sym prod1 prod2
   prod1 = Product $ fromPairs pairs1
   prod2 = Product $ fromPairs pairs2
 
+-- | Integrates the product of the two expressions by parts where the first expression
+-- is the one that is repeatedly differentiated.
 integrateByParts :: Ord e => e -> Expression e -> Expression e -> Expression e
 integrateByParts sym toDiff toInt = if (u == 0)
   then 0
@@ -548,6 +602,7 @@ integrateByParts sym toDiff toInt = if (u == 0)
   du = diff sym u
   remainder = integrate sym $ du*iv*(-1)
 
+-- | Repeatedly rewrites an expression until it stops changing (this is a part of a hack, because expand is hard)
 rewriteFixedPoint :: Ord e => (Expression e -> Expression e) -> Expression e -> Expression e
 rewriteFixedPoint f expr = fixed rewrites
   where
@@ -560,13 +615,17 @@ rewriteFixedPoint f expr = fixed rewrites
 -- This is due to multiplication of sums raised to negative powers.
 -- Using iterate (by using rewriteFixedPoint) is a hack and might cause infinite iteration if
 -- the expanded form is non-unique.
+
+-- | Rewrites an expression to an expanded form
 expand :: Ord e => Expression e -> Expression e
 expand = rewriteFixedPoint expand'
 
+-- | Helper function for expand
 expand' :: Ord e => Expression e -> Expression e
 expand' (Product seq') = constructExpandedProduct $ toPairs seq'
 expand' x = x
 
+-- | Multiplies a PairSeq SumTag by the given expression
 mulSum :: Ord e => PairSeq SumTag e -> Expression e -> PairSeq SumTag e
 mulSum seq' (Sum seq'') = fromPairs result
   where
@@ -576,6 +635,7 @@ mulSum seq' (Sum seq'') = fromPairs result
     return (e1 * e2, c1 * c2)
 mulSum seq' expr = fromPairs $ (\(a,b) -> (a * expr, b)) <$> toPairs seq'
 
+-- | Multiplies the list of terms and powers by the given expression
 constructExpandedProduct :: forall e . Ord e => [(Expression e, Rational)] ->
                             Expression e
 constructExpandedProduct seq' = Sum $ mulSum numeratorTerm denominatorTerm
@@ -607,21 +667,26 @@ constructExpandedProduct seq' = Sum $ mulSum numeratorTerm denominatorTerm
         then [(even', 1), (even', 1)]
         else [(expr, fromInteger $ n - 1), (expr, 1)]
 
+-- | A wrapper for symbols used during rewrites
 data TempSymbol e
   = Original e
   | Temporary String
   deriving (Eq, Ord, Show)
 
+-- | Wrap a user-defined symbol
 toTempSymbol :: e -> TempSymbol e
 toTempSymbol s = Original s
 
+-- | Unwrap a user-defined symbol
 fromTempSymbol :: TempSymbol e -> e
 fromTempSymbol (Original s) = s
 fromTempSymbol (Temporary s) = error $ "fromTempSymbol: unexpected symbol " ++ s ++ " in expression"
 
+-- | Derive an explicit time-stepping scheme using the previous value and supplied first-derivatives
 adamsBashforth :: Ord e => e -> Expression e -> [Expression e] -> Expression e
 adamsBashforth = adamsBashforthGeneral 1
 
+-- | Derive an explicit time-stepping scheme using the previous value and supplied nth-derivatives
 adamsBashforthGeneral :: Ord e => Integer -> e -> Expression e -> [Expression e] -> Expression e
 adamsBashforthGeneral numInt h y0 fs = if numInt < 0
  then error "adamsBashforthGeneral: number of integrals must be >=0"

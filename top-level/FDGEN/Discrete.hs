@@ -95,7 +95,7 @@ instance PrettyPrintable DiscreteTerminal
 -- | Terminal value used for encoding time-stepping schemes
 data TemporalTerminal
   = PreviousValue -- ^ The previous value of the field
-  | DeltaT -- ^ The time-step size (e.g.) h
+  | DeltaT -- ^ The time-step size (i.e. h)
   | PreviousDerivative Integer -- ^ The nth previous derivative
   deriving (Eq, Ord, Show)
 
@@ -605,9 +605,9 @@ buildSolve mesh fdfl solve = Solve
   buildDeltaT = discretiseMeshConstantExpr <$> Tensor.asScalar . buildTensorRValue mesh fdfl $ Parser._solveDeltaT solve
 
 -- | Generate an Adams-Bashforth integration scheme. The first parameter specifies the order of the
--- derivatives being used (usually 1 for dt) and the number of previous time-steps to use.
-buildAdamsBashForth :: Integer -> Integer -> Expression TemporalTerminal
-buildAdamsBashForth numDerivatives order =
+-- derivatives being used (usually 1) and the number of previous time-steps to use.
+buildAdamsBashforth :: Integer -> Integer -> Expression TemporalTerminal
+buildAdamsBashforth numDerivatives order =
   adamsBashforthGeneral numDerivatives DeltaT (Symbol PreviousValue) $ (Symbol . PreviousDerivative) <$> [0 .. order - 1]
 
 -- | Transform derivatives to new terminals that know about them and eliminate function representations.
@@ -813,7 +813,7 @@ buildUpdate mesh fdfl solve equ = Update
   rhs = buildTensorRValue mesh fdfl $ Parser._fieldUpdateRHS equ
   temporalOrder = Parser._solveTemporalOrder solve
   timestepping = case lhs of
-    FieldTemporalDerivative _ d -> Map.fromList [(n, buildAdamsBashForth d n) | n <- [1..temporalOrder]]
+    FieldTemporalDerivative _ d -> Map.fromList [(n, buildAdamsBashforth d n) | n <- [1..temporalOrder]]
   buildLHS expr = buildDerivative 0 expr
     where
     buildDerivative n (Parser.FieldTemporalDerivative subExpr) = buildDerivative (n + 1) subExpr
