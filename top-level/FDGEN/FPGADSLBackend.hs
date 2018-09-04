@@ -29,39 +29,45 @@ import qualified Data.Set as Set
 
 data FPGADSLBackend = FPGADSLBackend
 
+-- | Contains all declaration information for second-level DSL
 data Context = Context
-  { _contextCellVariables :: [CellVariable]
-  , _contextCellConstants :: [CellConstant]
-  , _contextMeshDimensions :: [DSLExpr]
-  , _contextBCDirectives :: [BCDirective]
+  { _contextCellVariables :: [CellVariable] -- ^ The CellVariable declarations
+  , _contextCellConstants :: [CellConstant] -- ^ The CellConstant declarations
+  , _contextMeshDimensions :: [DSLExpr] -- ^ The dimensions of the mesh
+  , _contextBCDirectives :: [BCDirective] -- ^ The boundary conditions directives
   } deriving Show
 
+-- | Contains information about cell variables
 data CellVariable = CellVariable
-  { _cellVariableName :: String
-  , _cellVariableExpr :: DSLExpr
-  , _cellVariableInitialUpdate :: Maybe (Integer, DSLExpr)
-  , _cellVariableInitialExpr :: Maybe DSLExpr
+  { _cellVariableName :: String -- ^ The variable name
+  , _cellVariableExpr :: DSLExpr -- ^ The update expression
+  , _cellVariableInitialUpdate :: Maybe (Integer, DSLExpr) -- ^ The initial update expression
+  , _cellVariableInitialExpr :: Maybe DSLExpr -- ^ The initial expression
   } deriving Show
 
+-- | Cell constant information
 data CellConstant = CellConstant
-  { _cellConstantName :: String
-  , _cellConstantExpr :: DSLExpr
+  { _cellConstantName :: String -- ^ The name
+  , _cellConstantExpr :: DSLExpr -- ^ The expression
   } deriving Show
 
+-- | Boundary condition information
 data BCDirective = BCDirective
-  { _bcDirectiveVariable :: String
-  , _bcDirectivePlane :: Plane
-  , _bcDirectiveOffset :: DSLExpr
-  , _bcDirectiveLow :: DSLExpr
-  , _bcDirectiveHigh :: DSLExpr
-  , _bcDirectiveAction :: ValueSource
+  { _bcDirectiveVariable :: String -- ^ The varible being constrained
+  , _bcDirectivePlane :: Plane -- ^ The plane on which the boundary exists
+  , _bcDirectiveOffset :: DSLExpr -- ^ Offset of the boundary normal to the plane
+  , _bcDirectiveLow :: DSLExpr -- ^ The lower range of the boundary in direction of the plane
+  , _bcDirectiveHigh :: DSLExpr -- ^ The upper range of the boundary in the direction of the plane
+  , _bcDirectiveAction :: ValueSource -- ^ Where the transformed value comes from
   } deriving Show
 
+-- | A sign representation used for direction handling
 data Sign
   = Negative
   | Positive
   deriving (Eq, Ord, Show)
 
+-- | The four currently supported edge domains
 data EdgeDomain
   = LeftEdge
   | RightEdge
@@ -69,6 +75,7 @@ data EdgeDomain
   | BottomEdge
   deriving (Eq, Ord, Show)
 
+-- | Axes for boundary conditions
 data Axis
   = Vertical
   | Horizontal
@@ -76,12 +83,14 @@ data Axis
 
 type Plane = Axis
 
+-- | Expressions for mesh values
 data MeshInfo = MeshInfo
-  { _meshInfoMargins :: [(Integer, Integer)]
-  , _meshInfoDimensions :: [Expression DSLExpr]
-  , _meshInfoSpacing :: [Expression DSLExpr]
+  { _meshInfoMargins :: [(Integer, Integer)] -- The top and bottom margins for the mesh (ghost points).
+  , _meshInfoDimensions :: [Expression DSLExpr] -- The dimension of the mesh in each dimension
+  , _meshInfoSpacing :: [Expression DSLExpr] -- The spacing of the mesh points in each dimension
   } deriving Show
 
+-- | Where values are copied from when boundary conditions are applied
 data ValueSource
   = CopyValueTowardsZero DSLExpr
   | CopyValueAwayFromZero DSLExpr
@@ -89,7 +98,6 @@ data ValueSource
   | NegateValueAwayFromZero DSLExpr
   | SetValue DSLExpr
   deriving Show
-
 
 class PDocPrintable a where
   pDocPrint :: a -> PDoc
@@ -112,6 +120,7 @@ instance PDocPrintable ValueSource where
         where
           zeroAtom = PDoc (toDoc name) NoAssoc AtomPrec
 
+-- | Given an edge domain, find the plane on which it lies
 getEdgeDomainPlane :: EdgeDomain -> Plane
 getEdgeDomainPlane d = case d of
   LeftEdge -> Vertical
@@ -119,6 +128,7 @@ getEdgeDomainPlane d = case d of
   TopEdge -> Horizontal
   BottomEdge -> Horizontal
 
+-- | Give an edge domain, the fine normal direction
 getEdgeDomainNormal :: EdgeDomain -> Axis
 getEdgeDomainNormal d = case d of
   LeftEdge -> Horizontal
@@ -126,10 +136,12 @@ getEdgeDomainNormal d = case d of
   TopEdge -> Vertical
   BottomEdge -> Vertical
 
+-- | Convert an axis to a dimension index
 axisDimension :: Axis -> Int
 axisDimension Horizontal = 0
 axisDimension Vertical = 1
 
+-- | Calculate the sign of the normal to an edge domain
 normalSign :: EdgeDomain -> Sign
 normalSign d = case d of
   LeftEdge -> Negative
@@ -137,9 +149,11 @@ normalSign d = case d of
   TopEdge -> Positive
   BottomEdge -> Negative
 
+-- | All exterior edge domains for mesh
 allExteriorEdgeDomains :: [EdgeDomain]
 allExteriorEdgeDomains = [LeftEdge, RightEdge, TopEdge, BottomEdge]
 
+-- | Convert string tag to edge domain
 tagToEdgeDomains :: String -> [EdgeDomain]
 tagToEdgeDomains tag = case tag of
   "left" -> [LeftEdge]
@@ -148,17 +162,21 @@ tagToEdgeDomains tag = case tag of
   "bottom" -> [BottomEdge]
   _ -> error $ "Unrecognised tag for edge domain " ++ show tag
 
+-- | Convert discretised edge domain to backend representation
 translateEdgeDomain :: Discrete.EdgeDomain -> [EdgeDomain]
 translateEdgeDomain d = case d of
   Discrete.AllExteriorEdges -> allExteriorEdgeDomains
   Discrete.TaggedEdgeString s -> tagToEdgeDomains s
 
+-- | Like concatMap, but removes duplicates
 concatMapUniq :: Ord b => (a -> [b]) -> [a] -> [b]
 concatMapUniq f = Set.toList . Set.fromList . concatMap f
 
+-- | Render a Haskell application of the value to the list of parameters
 renderApplication :: String -> [PDoc] -> PDoc
 renderApplication name params = renderPrefixMultiParam (name, PrecLevel 10) params
 
+-- | Renders a DSL expression to a string
 renderDSLExpr :: PDocPrintable a => a -> String
 renderDSLExpr = prettyPrint . pDocPrint
 
@@ -187,6 +205,7 @@ instance PDocPrintable DSLExpr where
       then renderPrefix ("-", PrecLevel 6) (renderTerminal . show $ abs n)
       else renderTerminal $ show n
 
+-- | ADT for DSL expressions used by second-level compiler
 data DSLExpr
   = DSLAdd DSLExpr DSLExpr
   | DSLSub DSLExpr DSLExpr

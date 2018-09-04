@@ -682,7 +682,7 @@ fromTempSymbol :: TempSymbol e -> e
 fromTempSymbol (Original s) = s
 fromTempSymbol (Temporary s) = error $ "fromTempSymbol: unexpected symbol " ++ s ++ " in expression"
 
--- | Derive an explicit time-stepping scheme using the previous value and supplied first-derivatives
+-- | Derive an explicit time-stepping scheme using the given delta-t, previous value and first-derivatives
 adamsBashforth :: Ord e => e -> Expression e -> [Expression e] -> Expression e
 adamsBashforth = adamsBashforthGeneral 1
 
